@@ -1,0 +1,10 @@
+# Security-sensitive changes require the repository owner's review.
+/.github/ @simplyzubair
+/package.json @simplyzubair
+/package-lock.json @simplyzubair
+/tests/ @simplyzubair
+/integration/ @simplyzubair
+/desktop/ @simplyzubair
+/core/ @simplyzubair
+/extension/ @simplyzubair
+/build/ @simplyzubair
