@@ -41,7 +41,8 @@ jobs:
           AWESOME_REQUIRE_NSIS: '1'
       - name: Check the update file names this version
         shell: bash
-        run: grep -q "^version: $VERSION$" release/latest.yml
+        run: |
+          grep -qE "^version: ${VERSION}[[:space:]]*$" release/latest.yml
       - name: Create SHA-256 file
         shell: powershell
         run: (Get-FileHash release/Downloaderr-Setup.exe -Algorithm SHA256).Hash.ToLower() + '  Downloaderr-Setup.exe' | Set-Content release/SHA256SUMS.txt
