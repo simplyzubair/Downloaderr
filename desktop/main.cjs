@@ -126,7 +126,7 @@ if (process.argv.includes('--native-host')) {
       browserScan.unref();
       const integration = async () => { await connectBrowsers(); return integrationInfo(); };
       const integrationInfo = () => ({ port: bridge?.port || null, connectedBrowsers, browsers, connectionError, extensionPath: path.join(integrationRoot, 'extension'), integrationPath: path.join(integrationRoot, 'integration'), packaged: app.isPackaged, executable: app.getPath('exe') });
-      const snapshot = () => ({ ...engine.snapshot(), integration: integrationInfo(), fileIcons: fileIcons.snapshot() });
+      const snapshot = () => ({ ...engine.snapshot(), integration: integrationInfo(), fileIcons: fileIcons.snapshot(), update: updateController?.status() || null, version: app.getVersion() });
       const shutdownServices = () => shutdownPromise ||= Promise.resolve().then(() => bridge?.close()).then(() => engine?.close());
       const openIntegrationWindow = async () => {
         if (integrationWindow && !integrationWindow.isDestroyed()) { showProgress(integrationWindow); return; }
@@ -241,7 +241,9 @@ if (process.argv.includes('--native-host')) {
         openOptions: openOptionsWindow,
         openAdd: openAddWindow,
         openScheduler: openSchedulerWindow,
-        showMenu: (_data, senderWindow) => { Menu.getApplicationMenu()?.popup({ window: senderWindow || window }); }
+        showMenu: (_data, senderWindow) => { Menu.getApplicationMenu()?.popup({ window: senderWindow || window }); },
+        installUpdate: () => updateController?.install(),
+        checkUpdates: () => updateController?.check({ manual: true })
       };
       handlers.registerBrowser = data => require('./browser-registration.cjs').registerBrowser(data, { dataDirectory: app.getPath('userData'), integrationRoot });
       handlers.browserSetup = async ({ action, browser } = {}) => {
@@ -334,7 +336,15 @@ if (process.argv.includes('--native-host')) {
       tray = new Tray(icon);
       tray.setToolTip('Downloaderr');
       const showDashboard = () => { if (window.isMinimized()) window.restore(); window.show(); window.focus(); };
-      tray.setContextMenu(Menu.buildFromTemplate([{ label: 'Show downloads', click: showDashboard }, { label: 'Quit', click: () => app.quit() }]));
+      const refreshTrayMenu = (update = updateController?.status()) => {
+        const updateItem = update?.state === 'ready'
+          ? { label: `Update now to ${update.version}`, click: () => updateController.install() }
+          : update?.state === 'downloading'
+            ? { label: `Downloading update… ${update.percent || 0}%`, enabled: false }
+            : { label: 'Check for updates', click: () => updateController?.check({ manual: true }) };
+        tray.setContextMenu(Menu.buildFromTemplate([{ label: 'Show downloads', click: showDashboard }, { type: 'separator' }, updateItem, { type: 'separator' }, { label: 'Quit', click: () => app.quit() }]));
+      };
+      refreshTrayMenu();
       tray.on('click', showDashboard);
       tray.on('double-click', showDashboard);
       window.on('minimize', dismissBrowserIntegration);
@@ -347,6 +357,10 @@ if (process.argv.includes('--native-host')) {
         dialog,
         getWindow: () => window,
         activeDownloadCount: () => engine.downloads.filter(download => ['connecting','downloading','assembling'].includes(download.status)).length,
+        onChange: update => {
+          refreshTrayMenu(update);
+          if (!window.isDestroyed()) window.webContents.send('downloader:change', snapshot());
+        },
         notify: (title, body, onClick) => {
           if (!Notification.isSupported()) return;
           const notification = new Notification({ title, body });
@@ -356,7 +370,8 @@ if (process.argv.includes('--native-host')) {
         installUpdate: async () => {
           quitting = true;
           await shutdownServices();
-          autoUpdater.quitAndInstall(false, true);
+          // Silent install, then Downloaderr starts again on the new version.
+          autoUpdater.quitAndInstall(true, true);
         }
       });
       updateController.start();

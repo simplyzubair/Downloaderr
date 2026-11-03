@@ -14,8 +14,8 @@ without sharing session tokens or signed media links.
 
 ## Just want to use it?
 
-Download **Downloaderr-Setup.exe** from the project's
-[latest release](https://github.com/simplyzubair/Downloaderr/releases/latest),
+Download it from **https://downloaderr.skillsgeek.com** (or **Downloaderr-Setup.exe** from the
+[latest release](https://github.com/simplyzubair/Downloaderr/releases/latest)),
 then see the [installation and usage guide](docs/INSTALL.md). It is a normal
 Windows installer with Start-menu and
 desktop shortcuts. No GitHub account, Node.js, or developer tools are needed for
@@ -51,8 +51,17 @@ npm start
 `npm run package` builds the unpacked application. `npm run dist` builds a local
 NSIS installer, without publishing. `npm run dist:portable` builds a portable
 executable. See [release requirements](docs/RELEASING.md) before distributing
-either. Current builds are unsigned. Version 0.1.1 and later can check GitHub
-Releases for updates and always ask before downloading or restarting.
+either. Current builds are unsigned.
+
+**Releases:** every push to `main` that changes the app builds and publishes
+release `v0.2.<run number>` (`.github/workflows/release.yml`). Never tag by hand.
+Installed apps check at startup and every hour, download the new version in the
+background, and show **Update now** in the sidebar and tray menu. If the user
+does not click it, the update installs when Downloaderr quits.
+
+**Website:** `website/` is the download page at https://downloaderr.skillsgeek.com,
+served by host nginx on Contabo from `/var/www/downloaderr`. Deploy changes with
+`bash scripts/deploy-website.sh`.
 
 The optional legacy extractor is described in [THIRD-PARTY.md](THIRD-PARTY.md).
 Do not commit its executable. `npm ci` installs the locked media dependencies.

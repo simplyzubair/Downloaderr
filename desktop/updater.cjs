@@ -1,4 +1,8 @@
-const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+// New versions download quietly in the background. The user installs them with
+// the "Update now" button (window, tray menu or notification); otherwise the
+// update installs when Downloaderr quits.
+const CHECK_INTERVAL_MS = 60 * 60 * 1000;
+const FIRST_CHECK_DELAY_MS = 15 * 1000;
 
 function noPublishedRelease(error) {
   const message = error?.message || String(error || '');
@@ -11,90 +15,73 @@ function friendlyUpdateError(error) {
   return 'GitHub Releases returned an unexpected response. Please try again later.';
 }
 
-function createUpdateController({ autoUpdater, app, dialog, getWindow, activeDownloadCount = () => 0, notify = () => {}, installUpdate }) {
-  let checkMode = null;
-  let checking = false;
-  let promptOpen = false;
-  let available = null;
-  let lastError = null;
+function createUpdateController({ autoUpdater, app, dialog, getWindow, activeDownloadCount = () => 0, notify = () => {}, onChange = () => {}, installUpdate }) {
+  // state: idle | checking | downloading | ready | latest | error
+  let status = { state: 'idle', version: null, percent: 0 };
+  let manualCheck = false;
 
-  autoUpdater.autoDownload = false;
-  autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.allowPrerelease = app.getVersion().includes('-');
 
+  const setStatus = next => { status = { ...status, ...next }; onChange(status); };
   const messageBox = options => {
     const parent = getWindow?.();
     return parent && !parent.isDestroyed?.() ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options);
   };
   const showCurrentVersion = () => messageBox({ type: 'info', title: 'No updates available', message: 'Downloaderr is up to date.', detail: `You are using version ${app.getVersion()}.`, buttons: ['Close'] });
-  const showError = async (error, requestedMode = checkMode) => {
-    if (error === lastError) return;
-    lastError = error;
-    checking = false;
-    checkMode = null;
-    const interactive = requestedMode === 'manual';
-    if (noPublishedRelease(error)) {
-      if (interactive) await showCurrentVersion();
-      return;
-    }
-    if (!interactive) return;
-    await messageBox({ type: 'error', title: 'Could not check for updates', message: 'Downloaderr could not check for updates.', detail: friendlyUpdateError(error), buttons: ['Close'] });
-  };
-  const promptForAvailableUpdate = async info => {
-    if (promptOpen) return;
-    promptOpen = true;
-    try {
-      const result = await messageBox({ type: 'info', title: 'Update available', message: `Downloaderr ${info.version} is available.`, detail: 'Download it now? You can continue using the app while it downloads.', buttons: ['Download update', 'Later'], defaultId: 0, cancelId: 1, noLink: true });
-      if (result.response === 0) await autoUpdater.downloadUpdate();
-    } catch (error) { await showError(error, 'manual'); }
-    finally { promptOpen = false; }
-  };
+  const finishManual = () => { const manual = manualCheck; manualCheck = false; return manual; };
 
-  autoUpdater.on('update-available', info => {
-    const requestedMode = checkMode;
-    checking = false;
-    checkMode = null;
-    available = info;
-    if (requestedMode === 'manual') promptForAvailableUpdate(info);
-    else notify('Downloaderr update available', `Version ${info.version} is ready to download.`, () => promptForAvailableUpdate(info));
-  });
+  autoUpdater.on('checking-for-update', () => { if (status.state !== 'ready') setStatus({ state: 'checking' }); });
+  autoUpdater.on('update-available', info => { finishManual(); setStatus({ state: 'downloading', version: info.version, percent: 0 }); });
+  autoUpdater.on('download-progress', progress => setStatus({ state: 'downloading', percent: Math.round(progress.percent || 0) }));
   autoUpdater.on('update-not-available', async () => {
-    const requestedMode = checkMode;
-    checking = false;
-    checkMode = null;
-    if (requestedMode === 'manual') await showCurrentVersion();
+    setStatus({ state: 'latest' });
+    if (finishManual()) await showCurrentVersion();
   });
-  autoUpdater.on('update-downloaded', async info => {
-    const active = activeDownloadCount();
-    const detail = active ? `${active} download${active === 1 ? ' is' : 's are'} active. Choose Later to let them finish before restarting.` : 'Restart Downloaderr to install the update. Your download history and settings will be kept.';
-    const result = await messageBox({ type: 'info', title: 'Update ready', message: `Downloaderr ${info.version} is ready to install.`, detail, buttons: ['Restart and install', 'Later'], defaultId: active ? 1 : 0, cancelId: 1, noLink: true });
-    if (result.response === 0) await installUpdate();
+  autoUpdater.on('update-downloaded', info => {
+    finishManual();
+    setStatus({ state: 'ready', version: info.version, percent: 100 });
+    notify('Downloaderr update ready', `Version ${info.version} is ready. Click to update now.`, () => install());
   });
-  autoUpdater.on('error', error => showError(error, checkMode));
+  autoUpdater.on('error', async error => {
+    const manual = finishManual();
+    // Offline or no release yet: stay quiet unless the user asked.
+    if (status.state !== 'ready') setStatus({ state: noPublishedRelease(error) ? 'latest' : 'error' });
+    if (!manual) return;
+    if (noPublishedRelease(error)) await showCurrentVersion();
+    else await messageBox({ type: 'error', title: 'Could not check for updates', message: 'Downloaderr could not check for updates.', detail: friendlyUpdateError(error), buttons: ['Close'] });
+  });
 
   const check = async ({ manual = false } = {}) => {
     if (!app.isPackaged) {
       if (manual) await messageBox({ type: 'info', title: 'Updates are unavailable in development', message: 'Update checks run in installed builds.', buttons: ['Close'] });
       return;
     }
-    if (available) {
-      if (manual) await promptForAvailableUpdate(available);
-      return;
-    }
-    if (checking) return;
-    const requestedMode = manual ? 'manual' : 'background';
-    checkMode = requestedMode;
-    checking = true;
-    lastError = null;
+    if (status.state === 'ready') { if (manual) await install(); return; }
+    if (['checking', 'downloading'].includes(status.state)) return;
+    manualCheck = manual;
     try { await autoUpdater.checkForUpdates(); }
-    catch (error) { await showError(error, requestedMode); }
+    catch (error) { autoUpdater.emit('error', error); }
+  };
+  const install = async () => {
+    if (status.state !== 'ready') return false;
+    const active = activeDownloadCount();
+    if (active) {
+      const result = await messageBox({ type: 'question', title: 'Update now?', message: `Update to Downloaderr ${status.version} now?`, detail: `${active} download${active === 1 ? ' is' : 's are'} running. They stop during the update, and you can resume them afterwards. Choose Later to let them finish; the update then installs when you quit Downloaderr.`, buttons: ['Update now', 'Later'], defaultId: 1, cancelId: 1, noLink: true });
+      if (result.response !== 0) return false;
+    }
+    await installUpdate();
+    return true;
   };
   const start = () => {
+    const first = setTimeout(() => check(), FIRST_CHECK_DELAY_MS);
+    first.unref?.();
     const recurring = setInterval(() => check(), CHECK_INTERVAL_MS);
     recurring.unref?.();
-    return () => clearInterval(recurring);
+    return () => { clearTimeout(first); clearInterval(recurring); };
   };
-  return { check, start, promptForAvailableUpdate };
+  return { check, install, start, status: () => status };
 }
 
-module.exports = { createUpdateController, noPublishedRelease, friendlyUpdateError, CHECK_INTERVAL_MS };
+module.exports = { createUpdateController, noPublishedRelease, friendlyUpdateError, CHECK_INTERVAL_MS, FIRST_CHECK_DELAY_MS };

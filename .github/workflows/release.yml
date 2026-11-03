@@ -1,12 +1,29 @@
-name: Build Windows release candidate
+name: Build and release Downloaderr
+
+# Every push to main that changes the app becomes release v0.2.<run number>.
+# Installed apps see the new release, download it in the background and show "Update now".
+# Website and docs changes do not make a release. Never tag releases by hand.
 on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md', 'docs/**', 'website/**', 'deploy/**', 'scripts/deploy-website.sh']
   workflow_dispatch:
+
 permissions:
   contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  build:
+  windows:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
+    permissions:
+      contents: write
+    env:
+      VERSION: 0.2.${{ github.run_number }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -15,15 +32,33 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
-      - run: npm run dist
+      - name: Build the installer
+        shell: bash
+        run: npx electron-builder --win nsis --x64 --publish never "-c.extraMetadata.version=$VERSION"
+      - name: Installer regression test (needs the NSIS compiler from the build)
+        run: node --test tests/installer-arguments.test.mjs
+        env:
+          AWESOME_REQUIRE_NSIS: '1'
+      - name: Check the update file names this version
+        shell: bash
+        run: grep -q "^version: $VERSION$" release/latest.yml
       - name: Create SHA-256 file
         shell: powershell
         run: (Get-FileHash release/Downloaderr-Setup.exe -Algorithm SHA256).Hash.ToLower() + '  Downloaderr-Setup.exe' | Set-Content release/SHA256SUMS.txt
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - name: Publish the GitHub release
+        # Branch runs (workflow_dispatch on a test branch) build and test only.
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$VERSION" --target "${{ github.sha }}" --title "Downloaderr $VERSION" --generate-notes \
+            release/Downloaderr-Setup.exe release/Downloaderr-Setup.exe.blockmap release/latest.yml release/SHA256SUMS.txt
+      - if: github.ref != 'refs/heads/main'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: unsigned-windows-release-candidate
+          name: windows-test-build
           path: |
             release/Downloaderr-Setup.exe
-            release/SHA256SUMS.txt
-          if-no-files-found: error
-          retention-days: 7
+            release/latest.yml
+          retention-days: 3

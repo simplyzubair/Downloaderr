@@ -64,6 +64,14 @@ svg{flex-shrink:0}
 .nav-count:empty{display:none}
 .integration-tool.needs-attention{color:var(--warn);background:var(--warn-soft)}
 .integration-tool.needs-attention:after{content:"";width:8px;height:8px;border-radius:50%;background:var(--warn);box-shadow:0 0 0 3px #e3a64033}
+.update-card{margin:auto 0 0;padding:12px;border-radius:var(--radius);background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow-sm);display:flex;flex-direction:column;gap:10px}
+.update-card.ready{border-color:var(--selected-border);background:var(--brand-soft)}
+.update-copy{display:flex;flex-direction:column;gap:2px}
+.update-copy strong{font-size:13px}
+.update-copy span{font-size:12px;color:var(--text-2)}
+.update-card progress{height:6px}
+.update-card .button{width:100%}
+.update-card:not([hidden])+.sidebar-footer{margin-top:12px}
 .sidebar-footer{margin-top:auto;padding:12px 10px 2px;display:grid;grid-template-columns:1fr auto;row-gap:2px;border-top:1px solid var(--border)}
 .speed-label{font-size:11px;color:var(--text-3)}
 .speed-value{grid-column:1;font-size:15px;font-weight:600;font-variant-numeric:tabular-nums}

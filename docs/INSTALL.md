@@ -143,10 +143,12 @@ not supported. Slow YouTube transfers remain a known limitation.
 
 ## Updates and uninstall
 
-Downloaderr checks GitHub Releases for updates after startup and every
-six hours. It asks before downloading and again before restarting. Active
-downloads are never restarted automatically; choose **Later** and let them
-finish first. You can also choose **Help → Check for updates** at any time.
+Downloaderr checks GitHub Releases for updates after startup and every hour.
+New versions download quietly in the background. When one is ready, an
+**Update now** button appears at the bottom of the sidebar (and in the tray
+menu). Click it to restart on the new version. If downloads are running, it
+asks first; choose **Later** to let them finish, and the update installs when
+you quit Downloaderr. You can also open **⋯ → Help → Check for updates**.
 After an extension update, reload your video tabs if their download button is
 missing.
 
