@@ -27,6 +27,43 @@ function preferredAudio(candidates) {
     ||candidates.find(f=>f.audioTrack?.audioIsDefault)
     ||candidates[0];
 }
+// The browser extension sends only the one audio entry it picked, which can be an
+// auto-dub. When that happens, read the video's public watch page and switch to the
+// track labelled acont=original. Any failure keeps the session exactly as sent.
+const audioMp4=f=>/^audio\/mp4/i.test(f?.mimeType||'')&&!f.isDrc&&!f.isVb&&!f.drmFamilies?.length;
+const textOf=(value,max)=>typeof value==='string'?value.slice(0,max):undefined;
+const digits=value=>/^\d{1,20}$/.test(String(value??''))?String(value):undefined;
+function pageAudioFormat(f) {
+  const itag=Number(f.itag);
+  if(!Number.isSafeInteger(itag)||!audioMp4(f))return null;
+  return {itag,mimeType:textOf(f.mimeType,200),bitrate:Number(f.bitrate)||undefined,averageBitrate:Number(f.averageBitrate)||undefined,
+    audioQuality:textOf(f.audioQuality,80),audioChannels:Number(f.audioChannels)||undefined,lastModified:digits(f.lastModified),
+    contentLength:digits(f.contentLength),approxDurationMs:digits(f.approxDurationMs),xtags:textOf(f.xtags,2048),
+    audioTrack:f.audioTrack&&typeof f.audioTrack==='object'?{id:textOf(f.audioTrack.id,100),audioIsDefault:!!f.audioTrack.audioIsDefault}:null,isDrc:false,isVb:false};
+}
+export function playerAudioFormats(html) {
+  const match=/ytInitialPlayerResponse\s*=\s*(\{.+?\})\s*;\s*(?:var\s|<\/script>)/s.exec(String(html||''));
+  if(!match)return [];
+  let player;try{player=JSON.parse(match[1]);}catch{return [];}
+  const formats=player?.streamingData?.adaptiveFormats;
+  return Array.isArray(formats)?formats.map(pageAudioFormat).filter(Boolean):[];
+}
+export async function withOriginalAudio(value,{fetchFn=globalThis.fetch,signal,timeoutMs=15000}={}) {
+  if(!value||typeof value!=='object'||!/^[\w-]{11}$/.test(value.videoId||'')||!Array.isArray(value.formats))return value;
+  const audioItag=Number(value.audioItag);
+  const sent=value.formats.filter(f=>audioMp4(f)&&Number(f.itag)===audioItag);
+  // Only act when the sent track is clearly a dub; untagged single-language videos stay untouched.
+  if(!sent.length||sent.some(f=>audioContentKind(f)==='original')||!sent.some(f=>/^dubbed/.test(audioContentKind(f))))return value;
+  const timeout=AbortSignal.timeout(timeoutMs), abort=signal?AbortSignal.any([signal,timeout]):timeout;
+  const response=await fetchFn(`https://www.youtube.com/watch?v=${value.videoId}&hl=en`,{signal:abort,redirect:'error',headers:{'accept-language':'en-US,en;q=0.9','user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36'}});
+  if(!response.ok)return value;
+  const html=await response.text();
+  if(html.length>8*1024*1024)return value;
+  const originals=playerAudioFormats(html).filter(f=>audioContentKind(f)==='original'&&f.lastModified);
+  const original=originals.find(f=>f.itag===audioItag)||originals.sort((a,b)=>(b.bitrate||0)-(a.bitrate||0))[0];
+  if(!original||value.formats.length>=150)return value;
+  return {...value,audioItag:original.itag,formats:[...value.formats.filter(f=>!(audioMp4(f)&&Number(f.itag)===original.itag)),original],originalAudio:true};
+}
 export function normalizeSabrSession(value) {
   if(!value||typeof value!=='object'||Array.isArray(value)||!/^[\w-]{11}$/.test(value.videoId||''))throw new Error('Invalid YouTube SABR session.');
   const serverAbrStreamingUrl=googleVideoSabr(value.serverAbrStreamingUrl);

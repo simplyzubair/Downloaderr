@@ -97,7 +97,7 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Downloaderr",
-      "artifactName": "Downloaderr-Setup.exe"
+      "artifactName": "Downloaderr-Setup-${version}.exe"
     },
     "extraResources": [
       {
@@ -158,10 +158,10 @@
           "to": "licenses/FFmpeg-BUILD.txt"
         }
       ],
-      "artifactName": "Downloaderr-mac-arm64.${ext}"
+      "artifactName": "Downloaderr-${version}-mac-arm64.${ext}"
     },
     "dmg": {
-      "artifactName": "Downloaderr-mac-arm64.dmg"
+      "artifactName": "Downloaderr-${version}-mac-arm64.dmg"
     }
   },
   "dependencies": {

@@ -14,7 +14,7 @@ without sharing session tokens or signed media links.
 
 ## Just want to use it?
 
-Download it from **https://downloaderr.skillsgeek.com** (or **Downloaderr-Setup.exe** from the
+Download it from **https://downloaderr.skillsgeek.com** (or **Downloaderr-Setup-&lt;version&gt;.exe** from the
 [latest release](https://github.com/simplyzubair/Downloaderr/releases/latest)),
 then see the [installation and usage guide](docs/INSTALL.md). It is a normal
 Windows installer with Start-menu and

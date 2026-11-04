@@ -69,3 +69,37 @@ test('when the chosen quality is only a dub, the original language at its own qu
   assert.equal(result.formats.find(f=>f.hasAudio).audioTrackId,'hi.4');
   assert.equal(normalizeSabrSession(result).audioItag,139);
 });
+
+test('a dubbed browser track is swapped for the original language from the watch page',async()=>{
+  const {withOriginalAudio}=await import('../core/sabr.mjs');
+  const dub={itag:140,mimeType:'audio/mp4',audioQuality:'AUDIO_QUALITY_MEDIUM',bitrate:130921,contentLength:'100',lastModified:'1',xtags:xtags({acont:'dubbed-auto',lang:'bn'}),audioTrack:{id:'bn.10',audioIsDefault:false}};
+  const video={itag:137,mimeType:'video/mp4',qualityLabel:'1080p',contentLength:'900',lastModified:'1'};
+  const session={videoId:'XiMRI9LLmmc',serverAbrStreamingUrl:'https://r1.googlevideo.com/videoplayback?sabr=1',videoPlaybackUstreamerConfig:'AQID',audioItag:140,videoItag:137,formats:[video,dub]};
+  const page={streamingData:{adaptiveFormats:[
+    {itag:140,mimeType:'audio/mp4; codecs="mp4a.40.2"',audioQuality:'AUDIO_QUALITY_MEDIUM',bitrate:130680,contentLength:'101',lastModified:'2',xtags:xtags({acont:'dubbed-auto',lang:'en-US'}),audioTrack:{id:'en-US.10',audioIsDefault:true}},
+    {itag:140,mimeType:'audio/mp4; codecs="mp4a.40.2"',audioQuality:'AUDIO_QUALITY_MEDIUM',bitrate:130831,contentLength:'102',lastModified:'3',xtags:xtags({acont:'original',lang:'hi'}),audioTrack:{id:'hi.4',audioIsDefault:false}}
+  ]}};
+  const urls=[];
+  const fetchFn=async url=>{urls.push(url);return {ok:true,text:async()=>`<script>var ytInitialPlayerResponse = ${JSON.stringify(page)};</script>`};};
+  const swapped=await withOriginalAudio(session,{fetchFn});
+  assert.deepEqual(urls,['https://www.youtube.com/watch?v=XiMRI9LLmmc&hl=en']);
+  const result=normalizeSabrSession(swapped);
+  assert.equal(result.formats.find(f=>f.hasAudio).audioTrackId,'hi.4');
+  assert.equal(result.formats.find(f=>f.hasVideo).itag,137);
+  assert.equal(session.formats.length,2,'the original session is not changed');
+});
+test('the watch page is only read for dubbed tracks, and any failure keeps the browser session',async()=>{
+  const {withOriginalAudio}=await import('../core/sabr.mjs');
+  const base={videoId:'XiMRI9LLmmc',serverAbrStreamingUrl:'https://r1.googlevideo.com/videoplayback?sabr=1',videoPlaybackUstreamerConfig:'AQID',audioItag:140};
+  const audio={itag:140,mimeType:'audio/mp4',audioQuality:'AUDIO_QUALITY_MEDIUM',contentLength:'100',lastModified:'1'};
+  let calls=0;const never=async()=>{calls++;throw new Error('should not fetch');};
+  for(const extra of [{},{xtags:xtags({acont:'original',lang:'hi'})},{xtags:xtags({lang:'hi'})}]){
+    const session={...base,formats:[{...audio,...extra}]};
+    assert.equal(await withOriginalAudio(session,{fetchFn:never}),session);
+  }
+  assert.equal(calls,0);
+  const dubbed={...base,formats:[{...audio,xtags:xtags({acont:'dubbed-auto',lang:'bn'})}]};
+  assert.equal(await withOriginalAudio(dubbed,{fetchFn:async()=>({ok:false,text:async()=>''})}),dubbed);
+  assert.equal(await withOriginalAudio(dubbed,{fetchFn:async()=>({ok:true,text:async()=>'<html>no player</html>'})}),dubbed);
+  assert.equal(await withOriginalAudio({...dubbed,videoId:'../../etc'},{fetchFn:never}).then(v=>v.videoId),'../../etc');
+});

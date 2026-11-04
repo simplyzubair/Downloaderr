@@ -7,7 +7,7 @@ import { validUrl, cleanHeaders, request, probe, transientStatus, retryAfter } f
 import { resolveHls, scopedHeaders } from './hls.mjs';
 import { youtubeUrl, downloadYoutube } from './youtube.mjs';
 import {streamProgress} from './stream-progress.mjs';
-import {downloadSabr,normalizeSabrSession} from './sabr.mjs';
+import {downloadSabr,normalizeSabrSession,withOriginalAudio} from './sabr.mjs';
 
 const TRANSIENT = new Set(['downloading', 'probing', 'assembling']);
 const CATEGORY = { Video: /\.(mp4|webm|mkv|mov|avi|m4v)$/i, Audio: /\.(mp3|m4a|aac|flac|ogg|wav)$/i, Archives: /\.(zip|7z|rar|tar|gz|iso)$/i, Documents: /\.(pdf|docx?|xlsx?|pptx?|txt|csv|epub)$/i, Programs: /\.(exe|msi|msix)$/i };
@@ -422,7 +422,27 @@ export class DownloadEngine extends EventEmitter {
     const dir=path.join(this.partsDirectory,d.id);
     await fs.rm(dir,{recursive:true,force:true});await fs.mkdir(dir,{recursive:true});
     d.kind='sabr';d.resumable=false;d.downloaded=0;
-    const selected=normalizeSabrSession(d.sabr), hasVideo=selected.videoItag!==undefined;
+    // The browser may send an auto-dubbed track; prefer the original language when YouTube labels one.
+    let session=d.sabr;
+    try{session=await withOriginalAudio(d.sabr,{signal});}catch{signal.throwIfAborted();session=d.sabr;}
+    const result=await this.transferSabr(d,session,headers,dir,signal).catch(async error=>{
+      if(session===d.sabr||signal.aborted)throw error;
+      // The original-language track was refused: fall back to the track the browser chose.
+      await fs.rm(dir,{recursive:true,force:true});await fs.mkdir(dir,{recursive:true});
+      d.downloaded=0;d.notice='The original audio track was unavailable, so the browser’s audio track was used.';
+      return this.transferSabr(d,d.sabr,headers,dir,signal);
+    });
+    if(result.session!==d.sabr)d.notice='Original audio language selected.';
+    const selected=result.selected, hasVideo=selected.videoItag!==undefined;
+    signal.throwIfAborted();d.status='assembling';d.speed=0;d.duration=result.duration||undefined;this.changed();
+    let output;
+    if(hasVideo){const {muxTracks}=await import('./mux.mjs');output=await muxTracks(dir,1,2,signal);}
+    else{const {convertMedia}=await import('./mux.mjs');output=await convertMedia(dir,[path.join(dir,'0.part')],'mp3',signal);}
+    d.total=d.downloaded=(await fs.stat(output)).size;d.segments=[{start:0,end:d.total-1,downloaded:d.total,done:true}];
+    await this.assemble(d,dir,signal,[output],true);
+  }
+  async transferSabr(d,session,headers,dir,signal) {
+    const selected=normalizeSabrSession(session), hasVideo=selected.videoItag!==undefined;
     const picked=selected.formats.filter(f=>f.itag===selected.audioItag||f.itag===selected.videoItag);
     d.total=picked.every(f=>Number(f.contentLength)>0)?picked.reduce((sum,f)=>sum+Number(f.contentLength),0):null;
     d.segments=picked.map(f=>({start:0,end:Number(f.contentLength)>0?Number(f.contentLength)-1:null,downloaded:0}));
@@ -436,12 +456,7 @@ export class DownloadEngine extends EventEmitter {
         for(let i=0;i<d.segments.length;i++)d.segments[i].downloaded=progress.tracks[picked[i].itag]||0;
       }});
     }finally{clearInterval(timer);}
-    signal.throwIfAborted();d.status='assembling';d.speed=0;d.duration=result.duration||undefined;this.changed();
-    let output;
-    if(hasVideo){const {muxTracks}=await import('./mux.mjs');output=await muxTracks(dir,1,2,signal);}
-    else{const {convertMedia}=await import('./mux.mjs');output=await convertMedia(dir,[path.join(dir,'0.part')],'mp3',signal);}
-    d.total=d.downloaded=(await fs.stat(output)).size;d.segments=[{start:0,end:d.total-1,downloaded:d.total,done:true}];
-    await this.assemble(d,dir,signal,[output],true);
+    return {...result,selected,session};
   }
   async transfer(d, info, segment, file, headers, signal, url=d.url) {
     const expected = segment.end === null ? null : segment.end - segment.start + 1;
