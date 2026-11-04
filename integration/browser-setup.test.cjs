@@ -21,7 +21,7 @@ test('browser discovery handles per-user and system install locations',async t=>
   await fs.mkdir(path.dirname(chrome),{recursive:true});await fs.writeFile(chrome,'');
   await fs.mkdir(path.dirname(firefox),{recursive:true});await fs.writeFile(firefox,'');
   const environment={LOCALAPPDATA:path.join(root,'local'),ProgramFiles:path.join(root,'programs')};
-  assert.equal(await findBrowserExecutable('Chrome',environment),chrome);
-  assert.equal(await findBrowserExecutable('Firefox',environment),firefox);
-  assert.equal(await findBrowserExecutable('Brave',environment),null);
+  assert.equal(await findBrowserExecutable('Chrome',environment,'win32'),chrome);
+  assert.equal(await findBrowserExecutable('Firefox',environment,'win32'),firefox);
+  assert.equal(await findBrowserExecutable('Brave',environment,'win32'),null);
 });

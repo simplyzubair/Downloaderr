@@ -28,7 +28,7 @@ test('automatic discovery connects every installed Chromium browser and profile'
   const opera=path.join(roaming,BROWSERS.Opera.data);await fs.mkdir(opera,{recursive:true});
   await fs.writeFile(path.join(opera,'Preferences'),JSON.stringify({extensions:{settings:{[ids.Opera]:{path:extension}}}}));
   const calls=[];
-  const result=await connectInstalledBrowsers({dataDirectory:path.join(root,'data'),integrationRoot,localAppData:local,roamingAppData:roaming},{register:async input=>{calls.push(input);return {manifestPath:'unused'};}});
+  const result=await connectInstalledBrowsers({platform:'win32',dataDirectory:path.join(root,'data'),integrationRoot,localAppData:local,roamingAppData:roaming},{register:async input=>{calls.push(input);return {manifestPath:'unused'};}});
   assert.deepEqual(result.map(value=>value.browser),['Chrome','Edge','Brave','Opera']);
   assert.deepEqual(Object.fromEntries(calls.map(value=>[value.browser,value.extensionId])),ids);
 });
@@ -42,7 +42,7 @@ test('published extension is discovered with relative Chrome paths but disabled 
   await fs.mkdir(profile,{recursive:true});
   const {EXTENSION_ID}=require('../desktop/extension-store.cjs');
   const calls=[];
-  const scan=()=>connectInstalledBrowsers({dataDirectory:path.join(root,'data'),integrationRoot,localAppData:local},{register:async input=>calls.push(input)});
+  const scan=()=>connectInstalledBrowsers({platform:'win32',dataDirectory:path.join(root,'data'),integrationRoot,localAppData:local},{register:async input=>calls.push(input)});
   const write=entry=>fs.writeFile(path.join(profile,'Preferences'),JSON.stringify({extensions:{settings:{[EXTENSION_ID]:entry}}}));
   await write({path:EXTENSION_ID+'/0.1.1_0',state:1});
   assert.deepEqual(await scan(),[{browser:'Chrome',connected:true,profiles:1}]);
@@ -61,7 +61,7 @@ test('Firefox add-on discovery registers its fixed native messaging identity',as
   await fs.mkdir(profile,{recursive:true});
   await fs.writeFile(path.join(profile,'extensions.json'),JSON.stringify({addons:[{id:'awesome-downloader@morluto.local',active:true,appDisabled:false}]}));
   const calls=[];
-  const result=await connectInstalledBrowsers({dataDirectory:path.join(root,'data'),integrationRoot,localAppData:path.join(root,'local'),roamingAppData:path.join(root,'roaming')},{register:async input=>{calls.push(input);return {manifestPath:'unused'};}});
+  const result=await connectInstalledBrowsers({platform:'win32',dataDirectory:path.join(root,'data'),integrationRoot,localAppData:path.join(root,'local'),roamingAppData:path.join(root,'roaming')},{register:async input=>{calls.push(input);return {manifestPath:'unused'};}});
   assert.deepEqual(result,[{browser:'Firefox',connected:true,profiles:1}]);
   assert.deepEqual(calls,[{browser:'Firefox',extensionId:'awesome-downloader@morluto.local'}]);
 });
@@ -78,7 +78,7 @@ test('modern store installs connect without a legacy state field and one connect
     await fs.writeFile(path.join(profile,'Secure Preferences'),JSON.stringify({extensions:{settings:{[EXTENSION_ID]:{path:EXTENSION_ID+'/0.1.1_0',manifest:{version:'0.1.1'},disable_reasons:reasons}}}}));
   }
   const calls=[];
-  const result=await connectInstalledBrowsers({dataDirectory:path.join(root,'data'),integrationRoot,localAppData:local},{register:async input=>calls.push(input),includeSetupState:true});
+  const result=await connectInstalledBrowsers({platform:'win32',dataDirectory:path.join(root,'data'),integrationRoot,localAppData:local},{register:async input=>calls.push(input),includeSetupState:true});
   assert.deepEqual(result,[{browser:'Chrome',connected:true,profiles:1},{browser:'Edge',connected:false,profiles:0,setupState:'approval'},{browser:'Brave',connected:false,profiles:0,setupState:'disabled'}]);
   assert.deepEqual(calls,[{browser:'Chrome',extensionId:EXTENSION_ID}]);
 });
@@ -95,7 +95,7 @@ test('removed extension tombstone overrides stale enabled preferences without mo
   await fs.writeFile(path.join(profile,'Preferences'),regular);
   await fs.writeFile(path.join(profile,'Secure Preferences'),secure);
   const calls=[];
-  const result=await connectInstalledBrowsers({dataDirectory:path.join(root,'data'),integrationRoot,localAppData:local},{register:async input=>calls.push(input),includeSetupState:true});
+  const result=await connectInstalledBrowsers({platform:'win32',dataDirectory:path.join(root,'data'),integrationRoot,localAppData:local},{register:async input=>calls.push(input),includeSetupState:true});
   assert.deepEqual(result,[{browser:'Chrome',connected:false,profiles:0,setupState:'removed'}]);
   assert.deepEqual(calls,[]);
   assert.equal(await fs.readFile(path.join(profile,'Preferences'),'utf8'),regular);
