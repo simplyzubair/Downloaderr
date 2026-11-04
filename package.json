@@ -18,7 +18,8 @@
     "test": "node --test tests/*.test.mjs integration/*.test.cjs extension/*.test.cjs",
     "package": "electron-builder --win dir",
     "dist": "electron-builder --win nsis --x64 --publish never",
-    "dist:portable": "electron-builder --win portable --x64 --publish never"
+    "dist:portable": "electron-builder --win portable --x64 --publish never",
+    "dist:mac": "electron-builder --mac --arm64 --publish never"
   },
   "devDependencies": {
     "electron": "44.9.1",
@@ -51,15 +52,54 @@
       "package.json"
     ],
     "asar": true,
+    "asarUnpack": [
+      "node_modules/ffmpeg-static/ffmpeg.exe",
+      "node_modules/ffmpeg-static/ffmpeg"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "signExecutable": false,
+      "extraResources": [
+        {
+          "from": "node_modules/ffmpeg-static/ffmpeg.exe.LICENSE",
+          "to": "licenses/FFmpeg-LICENSE.txt"
+        },
+        {
+          "from": "node_modules/ffmpeg-static/ffmpeg.exe.README",
+          "to": "licenses/FFmpeg-BUILD.txt"
+        },
+        {
+          "from": "vendor",
+          "to": "tools",
+          "filter": [
+            "yt-dlp.exe",
+            "*.txt"
+          ]
+        }
+      ]
+    },
+    "portable": {
+      "artifactName": "Downloaderr-${version}-Windows.exe"
+    },
+    "nsis": {
+      "include": "build/installer.nsh",
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Downloaderr",
+      "artifactName": "Downloaderr-Setup.exe"
+    },
     "extraResources": [
-      {
-        "from": "node_modules/ffmpeg-static/ffmpeg.exe.LICENSE",
-        "to": "licenses/FFmpeg-LICENSE.txt"
-      },
-      {
-        "from": "node_modules/ffmpeg-static/ffmpeg.exe.README",
-        "to": "licenses/FFmpeg-BUILD.txt"
-      },
       {
         "from": "node_modules/ffmpeg-static/LICENSE",
         "to": "licenses/ffmpeg-static-LICENSE.txt"
@@ -67,14 +107,6 @@
       {
         "from": "node_modules/googlevideo/LICENSE",
         "to": "licenses/googlevideo-LICENSE.txt"
-      },
-      {
-        "from": "vendor",
-        "to": "tools",
-        "filter": [
-          "yt-dlp.exe",
-          "*.txt"
-        ]
       },
       {
         "from": "extension",
@@ -96,33 +128,40 @@
         ]
       }
     ],
-    "asarUnpack": [
-      "node_modules/ffmpeg-static/ffmpeg.exe"
-    ],
-    "win": {
+    "mac": {
       "target": [
         {
-          "target": "nsis",
+          "target": "dmg",
           "arch": [
-            "x64"
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
           ]
         }
       ],
-      "icon": "build/icon.ico",
-      "signExecutable": false
+      "category": "public.app-category.utilities",
+      "icon": "assets/app-icon.png",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "extraResources": [
+        {
+          "from": "node_modules/ffmpeg-static/ffmpeg.LICENSE",
+          "to": "licenses/FFmpeg-LICENSE.txt"
+        },
+        {
+          "from": "node_modules/ffmpeg-static/ffmpeg.README",
+          "to": "licenses/FFmpeg-BUILD.txt"
+        }
+      ],
+      "artifactName": "Downloaderr-mac-arm64.${ext}"
     },
-    "portable": {
-      "artifactName": "Downloaderr-${version}-Windows.exe"
-    },
-    "nsis": {
-      "include": "build/installer.nsh",
-      "oneClick": false,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "shortcutName": "Downloaderr",
-      "artifactName": "Downloaderr-Setup.exe"
+    "dmg": {
+      "artifactName": "Downloaderr-mac-arm64.dmg"
     }
   },
   "dependencies": {

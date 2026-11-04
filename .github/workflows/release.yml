@@ -1,7 +1,8 @@
 name: Build and release Downloaderr
 
-# Every push to main that changes the app becomes release v0.2.<run number>.
-# Installed apps see the new release, download it in the background and show "Update now".
+# Every push to main that changes the app builds release v0.2.<run number>.
+# It is published only after the owner approves it on GitHub (environment "release").
+# Installed apps then see the new release, download it in the background and show "Update now".
 # Website and docs changes do not make a release. Never tag releases by hand.
 on:
   push:
@@ -58,22 +59,59 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
+  # Unsigned Apple Silicon build for personal use (no Apple Developer ID): ad-hoc signed only,
+  # so it cannot update itself; the app links to the download page when a new version is out.
+  mac:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    env:
+      VERSION: 0.2.${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Build the Mac app
+        run: npx electron-builder --mac --arm64 --publish never "-c.extraMetadata.version=$VERSION"
+      - name: Check the app bundle
+        run: |
+          codesign --verify --deep --strict release/mac-arm64/Downloaderr.app
+          test -x release/mac-arm64/Downloaderr.app/Contents/Resources/app.asar.unpacked/node_modules/ffmpeg-static/ffmpeg
+          grep -qE "^version: ${VERSION}[[:space:]]*$" release/latest-mac.yml
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mac
+          path: |
+            release/Downloaderr-mac-arm64.dmg
+            release/Downloaderr-mac-arm64.zip
+            release/latest-mac.yml
+          if-no-files-found: error
+          retention-days: 3
+
   # Only this small job can write: it uploads the tested files as a release.
   # Branch runs (workflow_dispatch on a test branch) stop after the build.
   publish:
-    needs: windows
+    needs: [windows, mac]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Waits until simplyzubair clicks "Approve and deploy" on the run page
+    # (environment "release" has a required reviewer and only allows main).
+    environment: release
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: windows
+          merge-multiple: true
       - env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           VERSION: 0.2.${{ github.run_number }}
         run: |
-          gh release create "v$VERSION" --target "${{ github.sha }}" --title "Downloaderr $VERSION" --generate-notes             Downloaderr-Setup.exe Downloaderr-Setup.exe.blockmap latest.yml SHA256SUMS.txt
+          gh release create "v$VERSION" --target "${{ github.sha }}" --title "Downloaderr $VERSION" --generate-notes             Downloaderr-Setup.exe Downloaderr-Setup.exe.blockmap latest.yml SHA256SUMS.txt             Downloaderr-mac-arm64.dmg Downloaderr-mac-arm64.zip latest-mac.yml

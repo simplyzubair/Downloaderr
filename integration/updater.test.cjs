@@ -3,14 +3,14 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { createUpdateController, CHECK_INTERVAL_MS, FIRST_CHECK_DELAY_MS } = require('../desktop/updater.cjs');
 
-function harness({ packaged = true, active = 0, responses = [] } = {}) {
+function harness({ packaged = true, active = 0, responses = [], canInstall = true } = {}) {
   const updater = new EventEmitter();
   updater.checkForUpdates = async () => { updater.checked = (updater.checked || 0) + 1; };
   const boxes = [], notifications = [], changes = [];
   const dialog = { showMessageBox: async (...args) => { boxes.push(args.at(-1)); return { response: responses.shift() ?? 1 }; } };
-  let installed = 0;
-  const controller = createUpdateController({ autoUpdater: updater, app: { isPackaged: packaged, getVersion: () => '0.2.1' }, dialog, getWindow: () => ({ isDestroyed: () => false }), activeDownloadCount: () => active, notify: (title, body, click) => notifications.push({ title, body, click }), onChange: status => changes.push({ ...status }), installUpdate: async () => { installed += 1; } });
-  return { updater, boxes, notifications, changes, controller, installed: () => installed };
+  let installed = 0, opened = 0;
+  const controller = createUpdateController({ autoUpdater: updater, app: { isPackaged: packaged, getVersion: () => '0.2.1' }, dialog, getWindow: () => ({ isDestroyed: () => false }), activeDownloadCount: () => active, notify: (title, body, click) => notifications.push({ title, body, click }), onChange: status => changes.push({ ...status }), installUpdate: async () => { installed += 1; }, canInstall, openDownloadPage: async () => { opened += 1; } });
+  return { updater, boxes, notifications, changes, controller, installed: () => installed, opened: () => opened };
 }
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
@@ -109,4 +109,16 @@ test('development build never contacts GitHub', async () => {
   await h.controller.check({ manual: true });
   assert.equal(h.updater.checked, undefined);
   assert.equal(h.boxes.at(-1).title, 'Updates are unavailable in development');
+});
+test('a Mac build that cannot self-install offers the download page instead', async () => {
+  const h = harness({ canInstall: false });
+  assert.equal(h.updater.autoDownload, false);
+  assert.equal(h.updater.autoInstallOnAppQuit, false);
+  await h.controller.check();
+  h.updater.emit('update-available', { version: '0.2.3' });
+  assert.equal(h.controller.status().state, 'available');
+  assert.equal(h.notifications.length, 1);
+  assert.equal(await h.controller.install(), true);
+  assert.equal(h.opened(), 1);
+  assert.equal(h.installed(), 0);
 });

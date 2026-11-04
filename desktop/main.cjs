@@ -4,7 +4,7 @@ const {showProgress,closeCancelledProgress,needsCloseChoice,shouldCancelReviewOn
 if (process.argv.includes('--native-host')) {
   require('../integration/native-host.cjs').runNativeHost();
 } else {
-  const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, Tray, Menu, nativeImage, Notification, nativeTheme } = require('electron');
+  const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, Tray, Menu, nativeImage, Notification, nativeTheme, powerSaveBlocker } = require('electron');
   // Matches the renderer's --bg colour so windows do not flash while loading.
   const windowBackground = () => nativeTheme.shouldUseDarkColors ? '#0d1210' : '#f4f6f5';
   app.setName('Downloaderr');
@@ -73,11 +73,11 @@ if (process.argv.includes('--native-host')) {
           filter: require('./resource-copy.cjs').copyIfChanged
         });
         const quoteBatch = value => String(value).replaceAll('%', '%%');
-        await fs.writeFile(path.join(integrationRoot, 'integration', 'native-host.cmd'),
+        if (process.platform === 'win32') await fs.writeFile(path.join(integrationRoot, 'integration', 'native-host.cmd'),
           `@echo off\r\nset ELECTRON_RUN_AS_NODE=1\r\n"${quoteBatch(app.getPath('exe'))}" "%~dp0native-host.cjs"\r\n`);
       }
       // Use the bundled runtime even in development; browsers need not inherit Node's PATH.
-      if (!app.isPackaged) {
+      if (!app.isPackaged && process.platform === 'win32') {
         const fs = require('node:fs/promises');
         await fs.writeFile(path.join(integrationRoot, 'integration', 'native-host.cmd'), `@echo off\r\nset ELECTRON_RUN_AS_NODE=1\r\n"${app.getPath('exe').replaceAll('%', '%%')}" "%~dp0native-host.cjs"\r\n`);
       }
@@ -151,7 +151,7 @@ if (process.argv.includes('--native-host')) {
       const openAddWindow = async ({ paste = false, scheduled = '' } = {}) => {
         if (schedulerWindow && !schedulerWindow.isDestroyed()) schedulerWindow.close();
         if (addWindow && !addWindow.isDestroyed()) { showProgress(addWindow); return; }
-        addWindow = new BrowserWindow({show:false,width:640,height:500,minWidth:560,minHeight:460,title:'New download',icon:appIconPath,backgroundColor:windowBackground(),autoHideMenuBar:true,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
+        addWindow = new BrowserWindow({show:false,width:640,height:560,minWidth:560,minHeight:520,title:'New download',icon:appIconPath,backgroundColor:windowBackground(),autoHideMenuBar:true,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
         addWindow.setMenu(null);
         addWindow.webContents.setWindowOpenHandler(()=>({action:'deny'}));
         addWindow.webContents.on('will-navigate',event=>event.preventDefault());
@@ -179,7 +179,7 @@ if (process.argv.includes('--native-host')) {
             showProgress(existing);return;
           }
           const reviewWindow=d.needsReview===true;
-          const progress=new BrowserWindow({width:620,height:reviewWindow?450:580,minWidth:580,minHeight:reviewWindow?420:520,title:d.filename,icon:appIconPath,backgroundColor:windowBackground(),autoHideMenuBar:true,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
+          const progress=new BrowserWindow({width:620,height:reviewWindow?490:580,minWidth:580,minHeight:reviewWindow?460:520,title:d.filename,icon:appIconPath,backgroundColor:windowBackground(),autoHideMenuBar:true,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
           progress.setMenu(null);progressWindows.set(id,progress);progressWindowSizes.set(progress,{expanded:{width:620,height:580}});
           if(d.status==='complete'){progress.setMinimumSize(500,330);progress.setSize(520,340);progress.setTitle('Download complete');}
           progress.on('close',async event=>{
@@ -226,6 +226,8 @@ if (process.argv.includes('--native-host')) {
             const result = await shell.openPath(d.path); if (result) throw new Error(result);
           } else if (action === 'openWith') {
             if (d.status !== 'complete' || !d.path) throw new Error('This download has not finished.');
+            // macOS has no "Open with" picker to call; open with the default app instead.
+            if (process.platform !== 'win32') { const result = await shell.openPath(d.path); if (result) throw new Error(result); return; }
             await new Promise((resolve,reject)=>require('node:child_process').execFile(path.join(process.env.SystemRoot||'C:\\Windows','System32','OpenWith.exe'),[d.path],{windowsHide:true},error=>error?reject(error):resolve()));
           } else if (action === 'reveal') { if (d.path) shell.showItemInFolder(d.path); else await shell.openPath(d.directory); }
           else return engine.action(id, action);
@@ -312,7 +314,15 @@ if (process.argv.includes('--native-host')) {
         { label: 'View', submenu: [ { label: 'All downloads', click: command('all') }, { role: 'togglefullscreen' }, { type: 'separator' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { role: 'resetZoom' } ] },
         { label: 'Help', submenu: [ { label: 'Browser integration…', click: command('integration') }, { label: 'Check for updates…', click: () => updateController?.check({ manual: true }) }, { type: 'separator' }, { label: 'About Downloaderr', click: () => dialog.showMessageBox(window, { title: 'About Downloaderr', message: `Downloaderr ${app.getVersion()}`, detail: 'A fast download manager with browser integration, segmented transfers and video capture.' }) } ] }
       ]));
+      // Keep the PC awake (the screen may still turn off) while anything is downloading.
+      let awakeBlocker = null;
+      const keepAwake = () => {
+        const busy = engine.downloads.some(download => ['probing','downloading','assembling'].includes(download.status));
+        if (busy && awakeBlocker === null) awakeBlocker = powerSaveBlocker.start('prevent-app-suspension');
+        else if (!busy && awakeBlocker !== null) { powerSaveBlocker.stop(awakeBlocker); awakeBlocker = null; }
+      };
       engine.on('change', async () => {
+        keepAwake();
         await fileIcons.load(engine.downloads);
         const data=snapshot();
         if (!window.isDestroyed()) window.webContents.send('downloader:change',data);
@@ -327,6 +337,8 @@ if (process.argv.includes('--native-host')) {
         }
       });
       engine.on('complete', d => {
+        // Mark the file as downloaded from the internet, like browsers do.
+        require('./mark-of-web.cjs').markFromInternet(d.path, d.url);
         const progress=progressWindows.get(d.id);
         if(progress&&!progress.isDestroyed()){if(engine.settings.hideCompletionDialog)progress.close();else{progress.setMinimumSize(500,330);progress.setSize(520,340);progress.setTitle('Download complete');}}
         if (engine.settings.notifyOnComplete && Notification.isSupported()) new Notification({ title: 'Download complete', body: d.filename }).show();
@@ -339,6 +351,8 @@ if (process.argv.includes('--native-host')) {
       const refreshTrayMenu = (update = updateController?.status()) => {
         const updateItem = update?.state === 'ready'
           ? { label: `Update now to ${update.version}`, click: () => updateController.install() }
+          : update?.state === 'available'
+            ? { label: `Download version ${update.version}…`, click: () => updateController.install() }
           : update?.state === 'downloading'
             ? { label: `Downloading update… ${update.percent || 0}%`, enabled: false }
             : { label: 'Check for updates', click: () => updateController?.check({ manual: true }) };
@@ -354,9 +368,12 @@ if (process.argv.includes('--native-host')) {
       updateController = require('./updater.cjs').createUpdateController({
         autoUpdater,
         app,
+        // Unsigned Mac builds cannot replace themselves; they offer the download page instead.
+        canInstall: process.platform !== 'darwin',
+        openDownloadPage: () => shell.openExternal('https://downloaderr.skillsgeek.com'),
         dialog,
         getWindow: () => window,
-        activeDownloadCount: () => engine.downloads.filter(download => ['connecting','downloading','assembling'].includes(download.status)).length,
+        activeDownloadCount: () => engine.downloads.filter(download => ['probing','downloading','assembling'].includes(download.status)).length,
         onChange: update => {
           refreshTrayMenu(update);
           if (!window.isDestroyed()) window.webContents.send('downloader:change', snapshot());

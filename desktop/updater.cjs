@@ -15,13 +15,13 @@ function friendlyUpdateError(error) {
   return 'GitHub Releases returned an unexpected response. Please try again later.';
 }
 
-function createUpdateController({ autoUpdater, app, dialog, getWindow, activeDownloadCount = () => 0, notify = () => {}, onChange = () => {}, installUpdate }) {
-  // state: idle | checking | downloading | ready | latest | error
+function createUpdateController({ autoUpdater, app, dialog, getWindow, activeDownloadCount = () => 0, notify = () => {}, onChange = () => {}, installUpdate, canInstall = true, openDownloadPage = () => {} }) {
+  // state: idle | checking | downloading | ready | available (cannot self-install) | latest | error
   let status = { state: 'idle', version: null, percent: 0 };
   let manualCheck = false;
 
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.autoDownload = canInstall;
+  autoUpdater.autoInstallOnAppQuit = canInstall;
   autoUpdater.allowPrerelease = app.getVersion().includes('-');
 
   const setStatus = next => { status = { ...status, ...next }; onChange(status); };
@@ -33,7 +33,12 @@ function createUpdateController({ autoUpdater, app, dialog, getWindow, activeDow
   const finishManual = () => { const manual = manualCheck; manualCheck = false; return manual; };
 
   autoUpdater.on('checking-for-update', () => { if (status.state !== 'ready') setStatus({ state: 'checking' }); });
-  autoUpdater.on('update-available', info => { finishManual(); setStatus({ state: 'downloading', version: info.version, percent: 0 }); });
+  autoUpdater.on('update-available', info => {
+    finishManual();
+    if (canInstall) { setStatus({ state: 'downloading', version: info.version, percent: 0 }); return; }
+    setStatus({ state: 'available', version: info.version, percent: 0 });
+    notify('Downloaderr update available', `Version ${info.version} is out. Click to download it.`, () => install());
+  });
   autoUpdater.on('download-progress', progress => setStatus({ state: 'downloading', percent: Math.round(progress.percent || 0) }));
   autoUpdater.on('update-not-available', async () => {
     setStatus({ state: 'latest' });
@@ -58,13 +63,14 @@ function createUpdateController({ autoUpdater, app, dialog, getWindow, activeDow
       if (manual) await messageBox({ type: 'info', title: 'Updates are unavailable in development', message: 'Update checks run in installed builds.', buttons: ['Close'] });
       return;
     }
-    if (status.state === 'ready') { if (manual) await install(); return; }
+    if (['ready', 'available'].includes(status.state)) { if (manual) await install(); return; }
     if (['checking', 'downloading'].includes(status.state)) return;
     manualCheck = manual;
     try { await autoUpdater.checkForUpdates(); }
     catch (error) { autoUpdater.emit('error', error); }
   };
   const install = async () => {
+    if (status.state === 'available') { await openDownloadPage(); return true; }
     if (status.state !== 'ready') return false;
     const active = activeDownloadCount();
     if (active) {
