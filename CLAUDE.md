@@ -6,3 +6,4 @@
 - Website: https://downloaderr.skillsgeek.com, `bash scripts/deploy-website.sh` (host nginx on `co`, `/var/www/downloaderr`, certbot HTTPS, Cloudflare DNS only).
 - Before every push: `npm test` (122+ tests). For release-workflow changes, push a branch and `gh workflow run release.yml --ref <branch>` (builds without publishing); merge to `main` only when green.
 - In this T3 shell `ELECTRON_RUN_AS_NODE=1` is set; unset it before launching Electron. Screenshot harness lives in `D:\Backups\rebrand-scripts\shot`.
+- Browser extension (owner decision, 2026-11-04): keep the upstream Chrome Web Store listing `dnolinbkicmedadaigcedkmndcpahmml` (old "Awesome Downloader Integration" name/logo, owned by the original author) so auto-install keeps working for free. Do not remove its trust or the installer's store step. Own branding in the store would need a $5 Chrome listing or a free Edge Add-ons listing.
