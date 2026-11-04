@@ -8,16 +8,41 @@ const googleVideoSabr=value=>{
   if(url.protocol!=='https:'||!(url.hostname==='googlevideo.com'||url.hostname.endsWith('.googlevideo.com'))||url.pathname!=='/videoplayback'||url.searchParams.get('sabr')!=='1'||url.username||url.password)throw new Error('Invalid YouTube SABR URL.');
   return url.href;
 };
+// YouTube labels each audio language in `xtags` (base64 protobuf, e.g. acont=original
+// or acont=dubbed-auto). The "default" flag often points at an auto-dub, so the
+// original language wins when it is labelled.
+export function audioContentKind(format) {
+  const raw=typeof format?.xtags==='string'?format.xtags:'';
+  if(!raw)return '';
+  let text=raw;
+  try{text+=' '+Buffer.from(raw.replace(/-/g,'+').replace(/_/g,'/'),'base64').toString('latin1');}catch{/* Plain-text xtags still match below. */}
+  return /acont[^a-z]{1,4}(original|dubbed-auto|dubbed|secondary|descriptive)/i.exec(text)?.[1]?.toLowerCase()||'';
+}
+function preferredAudio(candidates) {
+  const kind=f=>audioContentKind(f), dubbed=f=>/^dubbed/.test(kind(f));
+  return candidates.find(f=>kind(f)==='original')
+    ||candidates.find(f=>f.audioTrack?.audioIsDefault&&!dubbed(f))
+    ||candidates.find(f=>!f.audioTrack)
+    ||candidates.find(f=>!dubbed(f))
+    ||candidates.find(f=>f.audioTrack?.audioIsDefault)
+    ||candidates[0];
+}
 export function normalizeSabrSession(value) {
   if(!value||typeof value!=='object'||Array.isArray(value)||!/^[\w-]{11}$/.test(value.videoId||''))throw new Error('Invalid YouTube SABR session.');
   const serverAbrStreamingUrl=googleVideoSabr(value.serverAbrStreamingUrl);
   if(typeof value.videoPlaybackUstreamerConfig!=='string'||!value.videoPlaybackUstreamerConfig||value.videoPlaybackUstreamerConfig.length>131072)throw new Error('Missing YouTube streaming configuration.');
   if(!Array.isArray(value.formats)||!value.formats.length||value.formats.length>150)throw new Error('Missing YouTube SABR formats.');
-  const audioItag=Number(value.audioItag), videoItag=value.videoItag===undefined?undefined:Number(value.videoItag);
+  let audioItag=Number(value.audioItag);const videoItag=value.videoItag===undefined?undefined:Number(value.videoItag);
   // An itag is shared by dubbed languages, DRC and voice-boost variants.
-  // Keep precisely the chosen default audio and video, not every matching itag.
-  const audioCandidates=value.formats.filter(f=>f.itag===audioItag&&/^audio\/mp4/i.test(f.mimeType)&&!f.isDrc&&!f.isVb);
-  const audioRaw=audioCandidates.find(f=>f.audioTrack?.audioIsDefault)||audioCandidates.find(f=>!f.audioTrack)||audioCandidates[0];
+  // Keep precisely one audio (original language first) and one video, not every matching itag.
+  const plainAudio=value.formats.filter(f=>/^audio\/mp4/i.test(f.mimeType)&&!f.isDrc&&!f.isVb);
+  let audioCandidates=plainAudio.filter(f=>f.itag===audioItag);
+  // The chosen quality may exist only as a dub; then take the best original-language quality.
+  if(audioCandidates.length&&!audioCandidates.some(f=>audioContentKind(f)==='original')){
+    const original=plainAudio.filter(f=>audioContentKind(f)==='original').sort((a,b)=>(Number(b.bitrate)||0)-(Number(a.bitrate)||0))[0];
+    if(original){audioItag=original.itag;audioCandidates=plainAudio.filter(f=>f.itag===audioItag);}
+  }
+  const audioRaw=preferredAudio(audioCandidates);
   const videoRaw=videoItag===undefined?undefined:value.formats.find(f=>f.itag===videoItag&&/^video\/mp4/i.test(f.mimeType));
   const formats=[videoRaw,audioRaw].filter(Boolean).map(f=>({...f,...buildSabrFormat(f),audioTrack:f.audioTrack}));
   if(!Number.isSafeInteger(audioItag)||!formats.some(f=>f.itag===audioItag&&f.hasAudio))throw new Error('The selected YouTube audio track is unavailable.');
