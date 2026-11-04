@@ -48,7 +48,7 @@ export class DownloadEngine extends EventEmitter {
     this.dataDirectory = dataDirectory;
     this.statePath = path.join(dataDirectory, 'downloads.json');
     this.partsDirectory = path.join(dataDirectory, 'parts');
-    this.settings = { defaultDirectory: downloadDirectory, maxConcurrent: 3, connections: 8, speedLimitKbps: 0, categoryDirectories: {}, notifyOnComplete: true, revealOnComplete: false, confirmBrowserDownloads: true, startWithWindows: true };
+    this.settings = { defaultDirectory: downloadDirectory, maxConcurrent: 3, connections: 8, speedLimitKbps: 0, categoryDirectories: {}, notifyOnComplete: true, revealOnComplete: false, confirmBrowserDownloads: true, startWithWindows: true, preferredAudioLanguage: 'original' };
     this.downloads = [];
     this.jobs = new Map();
     this.persistChain = Promise.resolve();
@@ -109,11 +109,15 @@ export class DownloadEngine extends EventEmitter {
       }
     }
     for (const key of ['notifyOnComplete', 'revealOnComplete', 'confirmBrowserDownloads', 'hideCompletionDialog', 'startWithWindows']) if (patch[key] !== undefined) { if (typeof patch[key] !== 'boolean') throw new Error(`Invalid ${key}.`); next[key] = patch[key]; }
+    if (patch.preferredAudioLanguage !== undefined) {
+      if (typeof patch.preferredAudioLanguage !== 'string') throw new Error('Invalid preferredAudioLanguage.');
+      next.preferredAudioLanguage = patch.preferredAudioLanguage.slice(0, 50);
+    }
     if (next.speedLimitKbps !== this.settings.speedLimitKbps) this.rateNext = 0;
     this.settings = next;
     if (save) return this.persist().then(() => { this.changed(); this.tick(); return this.snapshot(); });
   }
-  async add({ urls, url, audioUrl, outputFormat, youtubeFormat, sabr, filename, scheduledAt, referer, headers, directory, category, description, queueOnly = false, reviewOnly = false, reuseActive = false } = {}) {
+  async add({ urls, url, audioUrl, audioLanguage, outputFormat, youtubeFormat, sabr, filename, scheduledAt, referer, headers, directory, category, description, queueOnly = false, reviewOnly = false, reuseActive = false } = {}) {
     const source = urls || (url ? [url] : []);
     if (!Array.isArray(source) || !source.length || source.length > 500) throw new Error('Add between 1 and 500 download URLs.');
     const normalized = source.map(validUrl);
@@ -123,6 +127,7 @@ export class DownloadEngine extends EventEmitter {
     if(sabrSession&&normalized.length!==1)throw new Error('A SABR session requires exactly one YouTube stream.');
     const audio = audioUrl ? validUrl(audioUrl) : undefined;
     if (audio && normalized.length !== 1) throw new Error('A separate audio track requires exactly one video.');
+    const selectedAudioLanguage = audioLanguage !== undefined ? (typeof audioLanguage === 'string' ? audioLanguage.slice(0, 50) : null) : (this.settings.preferredAudioLanguage || 'original');
     const when = scheduledAt ? new Date(scheduledAt).getTime() : null;
     if (when !== null && !Number.isFinite(when)) throw new Error('Invalid scheduled time.');
     if (normalized.some(u => /\.mpd(?:[?#]|$)/i.test(u))) throw new Error('DASH streams need a muxing engine; direct files and non-encrypted HLS VOD are supported.');
@@ -131,13 +136,13 @@ export class DownloadEngine extends EventEmitter {
     if (description !== undefined && (typeof description !== 'string' || description.length > 4096)) throw new Error('Description is too long.');
     if(reuseActive && normalized.length===1){
       const existing=this.downloads.find(d=>!['complete','cancelled','error'].includes(d.status) && d.outputFormat===outputFormat &&
-        (sabrSession ? d.sabr?.videoId===sabrSession.videoId && d.sabr?.videoItag===sabrSession.videoItag && d.sabr?.audioItag===sabrSession.audioItag : !d.sabr && d.url===normalized[0] && d.audioUrl===audio && d.youtubeFormat===youtubeFormat));
+        (sabrSession ? d.sabr?.videoId===sabrSession.videoId && d.sabr?.videoItag===sabrSession.videoItag && d.sabr?.audioItag===sabrSession.audioItag : !d.sabr && d.url===normalized[0] && d.audioUrl===audio && d.youtubeFormat===youtubeFormat && (!audioLanguage || d.audioLanguage===selectedAudioLanguage)));
       if(existing)return [existing.id];
     }
     const added = normalized.map(u => {
       const name = safeFilename(filename || suggestedName(u));
       const selectedCategory = category || categoryFor(name);
-      return { id: randomUUID(), url: u, audioUrl: audio, outputFormat, youtubeFormat, sabr:sabrSession, filename: name, explicitFilename: Boolean(filename), category: selectedCategory, explicitCategory: Boolean(category), description: description || '',
+      return { id: randomUUID(), url: u, audioUrl: audio, audioLanguage: selectedAudioLanguage, outputFormat, youtubeFormat, sabr:sabrSession, filename: name, explicitFilename: Boolean(filename), category: selectedCategory, explicitCategory: Boolean(category), description: description || '',
         status: queueOnly || reviewOnly ? 'paused' : when && when > Date.now() ? 'scheduled' : 'queued', needsReview: reviewOnly, scheduledAt: when ? new Date(when).toISOString() : null,
         downloaded: 0, total: null, speed: 0, connections: 0, error: null, path: null,
         directory: directory || this.settings.categoryDirectories[selectedCategory] || this.settings.defaultDirectory, createdAt: new Date().toISOString(), segments: [], validator: null,
@@ -148,7 +153,7 @@ export class DownloadEngine extends EventEmitter {
     this.changed(); this.tick();
     return added.map(d => d.id);
   }
-  async reviewDownload({ id, filename, directory, category, description = '', queueOnly = false, scheduledAt } = {}) {
+  async reviewDownload({ id, filename, directory, category, description = '', audioLanguage, queueOnly = false, scheduledAt } = {}) {
     const d = this.downloads.find(d => d.id === id);
     if (!d?.needsReview || this.jobs.has(id)) throw new Error('This download is not waiting for confirmation.');
     if (directory !== undefined && (typeof directory !== 'string' || !path.isAbsolute(directory))) throw new Error('Choose an absolute save folder.');
@@ -159,6 +164,7 @@ export class DownloadEngine extends EventEmitter {
     if (filename) { d.explicitFilename ||= filename !== d.filename; d.filename = safeFilename(filename); }
     if (category) { d.category = category; d.explicitCategory = true; }
     if (directory) d.directory = path.resolve(directory);
+    if (audioLanguage !== undefined) d.audioLanguage = typeof audioLanguage === 'string' ? audioLanguage.slice(0, 50) : d.audioLanguage;
     d.description = description; d.needsReview = false; d.scheduledAt = when ? new Date(when).toISOString() : null;
     d.status = queueOnly ? 'paused' : when && when > Date.now() ? 'scheduled' : 'queued';
     await this.persist(); this.changed(); this.tick();
@@ -215,9 +221,30 @@ export class DownloadEngine extends EventEmitter {
     if(youtubeUrl(d.url)) {
       const dir=path.join(this.partsDirectory,d.id);await fs.mkdir(dir,{recursive:true});
       d.kind='youtube';d.resumable=true;d.connections=1;
-      const result=await downloadYoutube({url:d.url,formatKey:d.youtubeFormat,directory:dir,signal,speedLimitKbps:this.settings.speedLimitKbps,onMetadata:choice=>{d.filename=safeFilename(choice.title+'.'+choice.outputFormat);d.duration=choice.duration;this.changed();},onProgress:p=>{Object.assign(d,p);d.segments=[{start:0,end:p.total?p.total-1:null,downloaded:p.downloaded}];this.changed();}});
+      const result=await downloadYoutube({
+        url:d.url,
+        formatKey:d.youtubeFormat,
+        audioLanguage:d.audioLanguage || this.settings.preferredAudioLanguage || 'original',
+        directory:dir,
+        signal,
+        speedLimitKbps:this.settings.speedLimitKbps,
+        onMetadata:choice=>{
+          d.filename=safeFilename(choice.title+'.'+choice.outputFormat);
+          d.duration=choice.duration;
+          if(choice.audioLanguageLabel) d.audioLanguage = choice.audioLanguageLabel;
+          if(choice.languageNotice) d.notice = choice.languageNotice;
+          this.changed();
+        },
+        onProgress:p=>{
+          Object.assign(d,p);
+          d.segments=[{start:0,end:p.total?p.total-1:null,downloaded:p.downloaded}];
+          this.changed();
+        }
+      });
       d.filename=safeFilename(result.choice.title+'.'+result.choice.outputFormat);
       d.duration=result.choice.duration;d.category=result.choice.outputFormat==='mp3'?'Audio':'Video';
+      if(result.choice.audioLanguageLabel) d.audioLanguage = result.choice.audioLanguageLabel;
+      if(result.choice.languageNotice) d.notice = result.choice.languageNotice;
       d.total=d.downloaded=result.size;d.estimated=false;
       d.segments=[{start:0,end:result.size-1,downloaded:result.size,done:true}];
       await this.assemble(d,dir,signal,[result.output],true);return;

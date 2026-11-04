@@ -245,7 +245,11 @@ if (process.argv.includes('--native-host')) {
         openScheduler: openSchedulerWindow,
         showMenu: (_data, senderWindow) => { Menu.getApplicationMenu()?.popup({ window: senderWindow || window }); },
         installUpdate: () => updateController?.install(),
-        checkUpdates: () => updateController?.check({ manual: true })
+        checkUpdates: () => updateController?.check({ manual: true }),
+        youtubeFormats: async data => {
+          const { youtubeFormats } = await import('../core/youtube.mjs');
+          return youtubeFormats(data?.url, { preferredLanguage: data?.preferredLanguage });
+        }
       };
       handlers.registerBrowser = data => require('./browser-registration.cjs').registerBrowser(data, { dataDirectory: app.getPath('userData'), integrationRoot });
       handlers.browserSetup = async ({ action, browser } = {}) => {
