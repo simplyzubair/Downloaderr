@@ -131,14 +131,20 @@
     // sits on top (elementFromPoint), and Chrome confirms the prompt is truly visible
     // (IntersectionObserver v2: no page-applied opacity, filter or transform). When Chrome
     // says it is hidden, the answer must come from the toolbar popup instead.
-    const shownAt=performance.now();let visible=null;
+    // Fails closed: without a confirmed visible state (or without v2 support, e.g. Firefox)
+    // the answer must come from the toolbar popup.
+    const shownAt=performance.now();let visibleSince=null,tracked=false;
     if(typeof IntersectionObserver==='function'){
-      try{new IntersectionObserver(entries=>{for(const entry of entries)if('isVisible' in entry)visible=entry.isVisible;},{trackVisibility:true,delay:100}).observe(panel);}catch{}
+      try{new IntersectionObserver(entries=>{for(const entry of entries){if(!('isVisible' in entry))continue;tracked=true;visibleSince=entry.isVisible?(visibleSince??entry.time):null;}},{trackVisibility:true,delay:100}).observe(panel);}catch{}
     }
     const host=container.host||container;
     const genuine=event=>{
       if(!event.isTrusted||performance.now()-shownAt<600||document.elementFromPoint(event.clientX,event.clientY)!==host)return false;
-      if(visible===false){sub.textContent='This page changes how Downloaderr’s prompt looks, so it cannot be answered here. Click the Downloaderr icon in the toolbar to allow or block this site.';return false;}
+      // Visible for at least 100 ms before this click, with no hidden report since.
+      if(visibleSince===null||event.timeStamp-visibleSince<100){
+        sub.textContent=tracked?'This page changes how Downloaderr’s prompt looks, so it cannot be answered here. Click the Downloaderr icon in the toolbar to allow or block this site.':'Click the Downloaderr icon in the toolbar to allow or block this site.';
+        return false;
+      }
       return true;
     };
     const badge=document.createElement('div');badge.className='badge';badge.innerHTML=MARK;
