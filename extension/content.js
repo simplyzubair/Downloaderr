@@ -125,14 +125,24 @@
   // Allow / No prompt. The answer is stored by the background script for this site only.
   function askPanel(container, note, onAllow) {
     const panel=document.createElement('div');panel.className='ask';panel.setAttribute('role','dialog');
+    // A page can cover an embedded frame, so frames only point to the toolbar popup.
+    const framed=window!==window.top;
+    // Clickjacking guard: ignore clicks right after the prompt appears, while it is
+    // covered (elementFromPoint), or while Chrome reports it as not visible.
+    const shownAt=performance.now();let visible=true;
+    if(typeof IntersectionObserver==='function'){
+      try{const observer=new IntersectionObserver(entries=>{for(const entry of entries)if('isVisible' in entry)visible=entry.isVisible;},{trackVisibility:true,delay:100});observer.observe(panel);}catch{}
+    }
+    const host=container.host||container;
+    const genuine=event=>event.isTrusted&&performance.now()-shownAt>=600&&visible&&document.elementFromPoint(event.clientX,event.clientY)===host;
     const badge=document.createElement('div');badge.className='badge';badge.innerHTML=MARK;
     const text=document.createElement('p');text.textContent=`Use Downloaderr on ${site||'this site'}?`;
-    const sub=document.createElement('span');sub.textContent=note||'Allow lets Downloaderr download videos and files here. No keeps Chrome\u2019s own downloads.';text.append(sub);
+    const sub=document.createElement('span');sub.textContent=framed?'Click the Downloaderr icon in the toolbar to allow or block this site.':note||'Allow lets Downloaderr download videos and files here. No keeps Chrome\u2019s own downloads.';text.append(sub);
     const choices=document.createElement('div');choices.className='choices';
     const no=document.createElement('button');no.type='button';no.className='deny';no.textContent='No';
     const yes=document.createElement('button');yes.type='button';yes.className='allow';yes.textContent='Allow';
     const answer=state=>async event=>{
-      event.preventDefault();event.stopPropagation();if(!event.isTrusted)return;
+      event.preventDefault();event.stopPropagation();if(!genuine(event))return;
       yes.disabled=no.disabled=true;
       try{
         const result=await send({action:'setSiteAccess',site,state});
@@ -143,7 +153,7 @@
       }catch(error){sub.textContent=friendlyError(error.message);yes.disabled=no.disabled=false;}
     };
     yes.addEventListener('click',answer('allow'));no.addEventListener('click',answer('block'));
-    choices.append(no,yes);panel.append(badge,text,choices);container.append(panel);
+    choices.append(no,yes);panel.append(badge,text);if(!framed)panel.append(choices);container.append(panel);
     return panel;
   }
   function positionAsk(panel, anchor) {

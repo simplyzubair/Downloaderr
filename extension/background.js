@@ -291,8 +291,10 @@ api.downloads.onCreated.addListener(async item => {
   let paused=false,accepted=false;
   try {
     if (!httpUrl(url) || item.state==='complete') return;
-    // The page that started the download decides; without one, the file's own site.
-    const page=httpUrl(item.referrer)||url, state=await siteState(page);
+    // The page that started the download decides. Without a known page (no referrer)
+    // the download stays with Chrome: the file's own site must not grant access.
+    const page=httpUrl(item.referrer);if(!page)return;
+    const state=await siteState(page);
     if(state!=='allow'){if(state==='ask')offerSiteAccess(page);return;}
     // IDM's observed ownership model: pause during handoff, resume on failure.
     await api.downloads.pause(item.id); paused=true;

@@ -358,6 +358,7 @@ export class DownloadEngine extends EventEmitter {
     let index = 0, lastBytes = d.downloaded, lastTime = Date.now();
     const progress = setInterval(() => { const now = Date.now(); d.speed = (d.downloaded - lastBytes) * 1000 / Math.max(1, now - lastTime); lastBytes = d.downloaded; lastTime = now; this.changed(); }, this.tickMs);
     const siblings = new AbortController(), groupSignal = AbortSignal.any([signal, siblings.signal]);
+    let lastSaved = 0;
     const worker = async () => {
       while (index < d.segments.length) {
         groupSignal.throwIfAborted();
@@ -375,7 +376,9 @@ export class DownloadEngine extends EventEmitter {
             if (Number.isFinite(expected) && expected !== segment.downloaded) throw new Error('Incomplete HLS segment.');
             await out.sync(); await out.close();
             await fs.rename(temp, path.join(dir, `${i}.part`)); segment.done = true;
-            await this.persist(); break;
+            // Saving the whole history after every small segment is slow; a crash only re-fetches the last ~2 s.
+            if (Date.now() - lastSaved >= 2000) { lastSaved = Date.now(); await this.persist(); }
+            break;
           } catch (error) {
             await out.close();
             if (groupSignal.aborted || attempt === 3) throw error;

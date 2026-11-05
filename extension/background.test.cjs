@@ -18,7 +18,7 @@ function harness({initialData=ALLOWED,webRequest={}}={}) {
   });
   browser.tabs.sendMessage=async()=>({ok:true});
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'background.js'),'utf8'),{browser,URL,URLSearchParams,Uint8Array,btoa:value=>Buffer.from(value,'binary').toString('base64'),youtubeMedia:require('./youtube-media.js'),siteAccess:require('./site-access.js')});
-  return {events,specs,data,nativeRequests,downloadCalls,createDownload(item){const value={state:'in_progress',tabId:-1,filename:'',referrer:'',...item};downloads.set(value.id,value);return structuredClone(value);},download:id=>downloads.get(id),request(message,sender){if(sender?.tab&&!sender.tab.url)sender={...sender,tab:{...sender.tab,url:'https://example.com/page'}};return new Promise(resolve=>{const accepted=events.message(message,sender,resolve);if(accepted!==true)resolve(undefined);});}};
+  return {events,specs,data,nativeRequests,downloadCalls,createDownload(item){const value={state:'in_progress',tabId:-1,filename:'',referrer:'https://example.com/page',...item};downloads.set(value.id,value);return structuredClone(value);},download:id=>downloads.get(id),request(message,sender){if(sender?.tab&&!sender.tab.url)sender={...sender,tab:{...sender.tab,url:'https://example.com/page'}};return new Promise(resolve=>{const accepted=events.message(message,sender,resolve);if(accepted!==true)resolve(undefined);});}};
 }
 test('video selection forwards explicit one-click download intent',async()=>{
   const h=harness(),sender={id:'extension-id',tab:{id:3}};

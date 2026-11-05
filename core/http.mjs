@@ -19,11 +19,16 @@ export function cleanHeaders(input = {}) {
   return headers;
 }
 
+// Reuse connections to the same server (HLS can fetch thousands of small segments).
+// Idle sockets close after a few seconds so nothing lingers.
+const agents = { http: new http.Agent({ keepAlive: true, timeout: 30000 }), https: new https.Agent({ keepAlive: true, timeout: 30000 }) };
+
 export async function request(url, { method = 'GET', headers = {}, signal, redirects = 0 } = {}) {
   url = validUrl(url);
   if (redirects > 10) throw new Error('Too many redirects.');
   const response = await new Promise((resolve, reject) => {
-    const req = (url.startsWith('https:') ? https : http).request(url, { method, headers, signal }, resolve);
+    const secure = url.startsWith('https:');
+    const req = (secure ? https : http).request(url, { method, headers, signal, agent: secure ? agents.https : agents.http }, resolve);
     req.on('error', reject);
     req.setTimeout(30000, () => req.destroy(new Error('Connection timed out.')));
     req.end();
