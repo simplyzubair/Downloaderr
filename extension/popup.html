@@ -4,14 +4,30 @@
   <meta charset="utf-8">
   <title>Downloaderr</title>
   <link rel="stylesheet" href="popup.css">
+  <script src="site-access.js" defer></script>
+  <script src="popup.js" defer></script>
 </head>
 <body>
   <header>
     <img src="icons/icon48.png" alt="">
     <div><h1>Downloaderr</h1><p>Browser integration installed</p></div>
   </header>
+  <section class="site" id="site-card" hidden>
+    <div class="site-head"><span class="site-name" id="site-name"></span><span class="site-state" id="site-state"></span></div>
+    <p class="site-help" id="site-help"></p>
+    <div class="site-actions" role="group" aria-label="Downloaderr on this site">
+      <button type="button" data-state="allow">Allow</button>
+      <button type="button" data-state="block">Block</button>
+      <button type="button" data-state="ask">Ask</button>
+    </div>
+  </section>
+  <details class="sites" id="sites">
+    <summary>Your sites <span id="sites-count"></span></summary>
+    <ul id="sites-list"></ul>
+    <p class="empty" id="sites-empty">No sites yet. Downloaderr asks the first time you use it on a website.</p>
+  </details>
   <main>
-    <p>Play a supported video, then use <strong>Download this video</strong> above the player to choose a quality and send it to the desktop app.</p>
+    <p>Play a supported video, then use the green <strong>Downloaderr</strong> button above the player to choose a quality and send it to the desktop app.</p>
     <p>You can also right-click a file, video, audio, or link and choose <strong>Download with Downloaderr</strong>.</p>
   </main>
   <footer>Keep Downloaderr running. If the video button is missing, open <strong>Browser extension</strong> in the desktop app, refresh the browser status, and reload the page.</footer>

@@ -3,7 +3,9 @@ const assert=require('node:assert/strict');
 const vm=require('node:vm');
 const fs=require('node:fs');
 const path=require('node:path');
-function harness({initialData={},webRequest={}}={}) {
+// Existing tests act on sites the user already allowed; site-permission tests pass their own rules.
+const ALLOWED={siteAccess:{'example.com':'allow','example.test':'allow','youtube.com':'allow'}};
+function harness({initialData=ALLOWED,webRequest={}}={}) {
   const events={},specs={},nativeRequests=[],downloadCalls=[];
   const event=name=>({addListener(fn,filter,spec){events[name]=fn;specs[name]=spec;}});
   const data=structuredClone(initialData),downloads=new Map();
@@ -15,8 +17,8 @@ function harness({initialData={},webRequest={}}={}) {
     async cancel(id){downloadCalls.push(['cancel',id]);downloads.delete(id);}
   });
   browser.tabs.sendMessage=async()=>({ok:true});
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'background.js'),'utf8'),{browser,URL,URLSearchParams,Uint8Array,btoa:value=>Buffer.from(value,'binary').toString('base64'),youtubeMedia:require('./youtube-media.js')});
-  return {events,specs,data,nativeRequests,downloadCalls,createDownload(item){const value={state:'in_progress',tabId:-1,filename:'',referrer:'',...item};downloads.set(value.id,value);return structuredClone(value);},download:id=>downloads.get(id),request(message,sender){return new Promise(resolve=>{const accepted=events.message(message,sender,resolve);if(accepted!==true)resolve(undefined);});}};
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'background.js'),'utf8'),{browser,URL,URLSearchParams,Uint8Array,btoa:value=>Buffer.from(value,'binary').toString('base64'),youtubeMedia:require('./youtube-media.js'),siteAccess:require('./site-access.js')});
+  return {events,specs,data,nativeRequests,downloadCalls,createDownload(item){const value={state:'in_progress',tabId:-1,filename:'',referrer:'',...item};downloads.set(value.id,value);return structuredClone(value);},download:id=>downloads.get(id),request(message,sender){if(sender?.tab&&!sender.tab.url)sender={...sender,tab:{...sender.tab,url:'https://example.com/page'}};return new Promise(resolve=>{const accepted=events.message(message,sender,resolve);if(accepted!==true)resolve(undefined);});}};
 }
 test('video selection forwards explicit one-click download intent',async()=>{
   const h=harness(),sender={id:'extension-id',tab:{id:3}};
@@ -162,4 +164,46 @@ test('media cache is bounded, deduplicated, and cleared on navigation',async()=>
   assert.equal(result.items.length,100); assert.equal(new Set(result.items.map(i=>i.url)).size,100);
   h.events.updated(9,{status:'loading'});
   result=await h.request({action:'listForFrame'},sender); assert.equal(result.items.length,0);
+});
+
+test('on an undecided or blocked site Chrome keeps the download and nothing reaches the desktop',async()=>{
+  for(const rules of [{},{'example.com':'block'}]){
+    const h=harness({initialData:{siteAccess:rules}});
+    const item=h.createDownload({id:5,url:'https://cdn.example.com/file.zip',referrer:'https://www.example.com/page'});
+    await h.events.download(item);
+    assert.deepEqual(h.downloadCalls,[]);assert.equal(h.nativeRequests.length,0);
+    const sender={id:'extension-id',tab:{id:3,url:'https://www.example.com/page'}};
+    assert.equal((await h.request({action:'listForFrame'},sender)).ok,false);
+    assert.equal((await h.request({action:'download',item:{url:'https://example.com/video.mp4'}},sender)).ok,false);
+    assert.equal(h.nativeRequests.length,0);
+  }
+});
+test('the page that started a download decides, and allowed sites hand it to the desktop',async()=>{
+  const h=harness({initialData:{siteAccess:{'example.com':'allow','cdn.net':'block'}}});
+  await h.events.download(h.createDownload({id:6,url:'https://files.cdn.net/a.zip',referrer:'https://example.com/page'}));
+  assert.equal(h.nativeRequests.length,1);
+  await h.events.download(h.createDownload({id:7,url:'https://example.com/b.zip',referrer:'https://files.cdn.net/page'}));
+  assert.equal(h.nativeRequests.length,1,'a blocked referring page keeps the browser download');
+});
+test('a page may only answer Allow or No for its own site; the popup manages every site',async()=>{
+  const h=harness({initialData:{siteAccess:{}}});
+  const page={id:'extension-id',tab:{id:3,url:'https://www.example.com/watch'}};
+  assert.equal((await h.request({action:'siteStatus'},page)).state,'ask');
+  assert.equal((await h.request({action:'setSiteAccess',site:'other.com',state:'allow'},page)).ok,false);
+  assert.equal((await h.request({action:'setSiteAccess',site:'example.com',state:'ask'},page)).ok,false);
+  assert.equal((await h.request({action:'setSiteAccess',site:'example.com',state:'allow'},page)).state,'allow');
+  assert.equal((await h.request({action:'listForFrame'},page)).ok,true);
+  const popup={id:'extension-id'};
+  assert.equal((await h.request({action:'setSiteAccess',site:'other.com',state:'block'},popup)).state,'block');
+  assert.deepEqual((await h.request({action:'siteList'},popup)).rules,{'example.com':'allow','other.com':'block'});
+  assert.equal((await h.request({action:'setSiteAccess',site:'example.com',state:'ask'},popup)).state,'ask');
+  assert.deepEqual(h.data.siteAccess,{'other.com':'block'});
+  assert.equal((await h.request({action:'siteStatus',url:'https://other.com/x'},popup)).state,'block');
+  assert.equal((await h.request({action:'siteList'},page)).ok,false,'pages cannot read the site list');
+});
+test('blocked sites cannot even feed media lists to the extension',async()=>{
+  const h=harness({initialData:{siteAccess:{'example.com':'block'}}});
+  const sender={id:'extension-id',tab:{id:3,url:'https://example.com/page'}};
+  await h.request({action:'remember',items:[{url:'https://example.com/video.mp4'}]},sender);
+  assert.equal(h.data.mediaByTab,undefined);
 });

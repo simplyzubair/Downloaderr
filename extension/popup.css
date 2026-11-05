@@ -12,3 +12,25 @@ main p{counter-increment:tip;position:relative;margin:0;padding:10px 12px 10px 4
 main p:before{content:counter(tip);position:absolute;left:12px;top:10px;width:22px;height:22px;display:grid;place-items:center;border-radius:7px;background:linear-gradient(135deg,var(--brand),var(--brand-2));color:#fff;font-size:11.5px;font-weight:700}
 strong{font-weight:650;color:var(--text)}
 footer{padding:2px 4px 0;color:var(--faint);font-size:11.5px}
+
+/* Site permission card and saved sites list (popup.js). */
+.site{margin-top:12px;padding:12px 14px;border:1px solid var(--border);border-radius:12px;background:var(--surface)}
+.site-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.site-name{font-weight:700;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.site-state{flex:none;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:600;background:var(--brand-soft);color:var(--brand-text)}
+.site-state.block{background:#fde8ea;color:#c42b37}.site-state.ask{background:#fdf2da;color:#a96b0f}
+.site-help{margin:6px 0 10px;color:var(--muted);font-size:12px}
+.site-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:3px;border-radius:10px;background:var(--bg)}
+.site-actions button{height:30px;border:0;border-radius:8px;background:transparent;color:var(--muted);font-family:inherit;font-size:12px;font-weight:600;cursor:pointer}
+.site-actions button:hover{color:var(--text)}
+.site-actions button[aria-pressed=true]{background:var(--surface);color:var(--text);box-shadow:0 1px 2px #0000001a,0 0 0 1px var(--border)}
+.site-actions button[data-state=allow][aria-pressed=true]{background:var(--brand);color:#fff;box-shadow:none}
+.sites{margin-top:10px;border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:0 14px}
+.sites summary{cursor:pointer;padding:10px 0;font-weight:600;font-size:12.5px}
+.sites ul{list-style:none;margin:0 0 10px;padding:0;max-height:160px;overflow:auto}
+.sites li{display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--border)}
+.sites .name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px}
+.sites .remove{width:24px;height:24px;border:0;border-radius:6px;background:transparent;color:var(--faint);font-size:16px;cursor:pointer}
+.sites .remove:hover{background:var(--bg);color:var(--text)}
+.sites .empty{margin:0 0 10px;color:var(--faint);font-size:12px}
+@media(prefers-color-scheme:dark){.site-state.block{background:#3a191c;color:#f0606a}.site-state.ask{background:#382a12;color:#e3a640}}

@@ -1,5 +1,5 @@
 /* Downloads require extension UI messages; page player metadata is bounded and sanitized. */
-if(typeof importScripts==='function') importScripts('hls.js','youtube-media.js');
+if(typeof importScripts==='function') importScripts('hls.js','youtube-media.js','site-access.js');
 const api = globalThis.browser || chrome;
 const HOST = 'com.awesome.downloader';
 const CACHE_KEY = 'mediaByTab';
@@ -106,6 +106,36 @@ async function enqueue(item, tabId) {
   const requestHeaders=requestContext.get(tabId)?.get(url);
   return nativeSend({action: 'download', url, youtubeFormat:item.youtubeFormat, sabr, startNow:item.startNow===true, audioUrl:httpUrl(item.audioUrl)||undefined, outputFormat:item.outputFormat, filename: item.filename, referer: httpUrl(requestHeaders?.referer || item.referer) || undefined,requestHeaders});
 }
+// Per-site permission (site-access.js). Only sites the user allowed may hand
+// videos or browser downloads to the desktop; elsewhere Chrome keeps control.
+const SITE_KEY=globalThis.siteAccess.KEY;
+async function siteRules(){try{const data=await api.storage.local.get(SITE_KEY);return data[SITE_KEY]&&typeof data[SITE_KEY]==='object'?data[SITE_KEY]:{};}catch{return {};}}
+async function siteState(url){return globalThis.siteAccess.decide(await siteRules(),globalThis.siteAccess.siteOf(url));}
+async function requireAllowed(url){
+  if(await siteState(url)!=='allow')throw new Error('Downloaderr is not allowed on this site. Click the Downloaderr icon in the toolbar to allow it.');
+}
+async function setBadge(tabId,state){
+  try{
+    await api.action.setBadgeText({tabId,text:state==='ask'?'?':''});
+    if(state==='ask')await api.action.setBadgeBackgroundColor?.({tabId,color:'#1f9d4c'});
+  }catch{}
+}
+async function refreshBadge(tabId,url){
+  if(tabId<0)return;
+  if(url===undefined){try{url=(await api.tabs.get(tabId)).url;}catch{return;}}
+  const site=globalThis.siteAccess.siteOf(url||'');
+  await setBadge(tabId,site?await siteState(url):'allow');
+}
+// A download started on an undecided site: Chrome keeps it, and the page offers Allow / No.
+async function offerSiteAccess(pageUrl){
+  const site=globalThis.siteAccess.siteOf(pageUrl||'');if(!site)return;
+  let tabs=[];try{tabs=await api.tabs.query({active:true});}catch{}
+  for(const tab of tabs){
+    if(globalThis.siteAccess.siteOf(tab.url||'')!==site)continue;
+    await setBadge(tab.id,'ask');
+    api.tabs.sendMessage(tab.id,{action:'askSiteAccess',site,reason:'download'}).catch(()=>{});
+  }
+}
 function updateSession(key,change) {
   const next = serial.then(async () => {
     const data = await api.storage.session.get(key);
@@ -159,7 +189,8 @@ api.webRequest.onHeadersReceived.addListener(details => {
   if(/\.m3u8(?:[?#]|$)/i.test(details.url)||/mpegurl/i.test(mime))discoverHls(details.tabId,details.url);
 }, {urls: ['http://*/*', 'https://*/*']}, ['responseHeaders']);
 api.tabs.onRemoved.addListener(tabId => {youtubePlayers.delete(tabId);youtubeObserved.delete(tabId);clearSabrCapture(tabId);requestContext.delete(tabId);hlsSeen.delete(tabId);updateCache(map => { delete map[tabId]; }).catch(() => {});});
-api.tabs.onUpdated.addListener((tabId, change) => { if (change.status === 'loading') {youtubePlayers.delete(tabId);youtubeObserved.delete(tabId);clearSabrCapture(tabId);requestContext.delete(tabId);hlsSeen.delete(tabId);updateCache(map => { delete map[tabId]; }).catch(() => {});} });
+api.tabs.onActivated?.addListener(info=>{refreshBadge(info.tabId).catch(()=>{});});
+api.tabs.onUpdated.addListener((tabId, change, tab) => { if (change.status === 'complete') refreshBadge(tabId,tab?.url).catch(()=>{}); if (change.status === 'loading') {youtubePlayers.delete(tabId);youtubeObserved.delete(tabId);clearSabrCapture(tabId);requestContext.delete(tabId);hlsSeen.delete(tabId);updateCache(map => { delete map[tabId]; }).catch(() => {});} });
 api.runtime.onInstalled.addListener(async () => {
   try {
     await api.contextMenus.removeAll();
@@ -180,6 +211,25 @@ api.contextMenus.onClicked.addListener(async (info, tab) => {
 api.runtime.onMessage.addListener((message, sender, respond) => {
   if (sender.id !== api.runtime.id) return false;
   const task = async () => {
+    if(message.action==='siteStatus'){
+      // Popup asks about any page; a page script only about its own tab.
+      const url=sender.tab?sender.tab.url:message.url;
+      const site=globalThis.siteAccess.siteOf(url||'');
+      return {ok:true,site,state:site?await siteState(url):'ask'};
+    }
+    if(message.action==='siteList' && !sender.tab){return {ok:true,rules:await siteRules()};}
+    if(message.action==='setSiteAccess'){
+      const site=String(message.site||'');
+      // From a page, only its own site and only a real Allow/No answer.
+      if(sender.tab&&(site!==globalThis.siteAccess.siteOf(sender.tab.url||'')||!['allow','block'].includes(message.state)))throw new Error('Invalid site permission request.');
+      if(!['allow','block','ask'].includes(message.state))throw new Error('Invalid site permission.');
+      const rules=globalThis.siteAccess.withRule(await siteRules(),site,message.state);
+      await api.storage.local.set({[SITE_KEY]:rules});
+      if(sender.tab)await refreshBadge(sender.tab.id,sender.tab.url);
+      return {ok:true,state:globalThis.siteAccess.decide(rules,site)};
+    }
+    if(sender.tab&&['playerResponse','remember'].includes(message.action)&&await siteState(sender.tab.url)==='block')return {ok:true};
+    if(sender.tab&&['download','listForFrame'].includes(message.action))await requireAllowed(sender.tab.url);
     if(message.action==='playerResponse' && sender.tab) {
       const page=new URL(sender.url || sender.tab.url || 'https://invalid.local');
       if(!['www.youtube.com','youtube.com','m.youtube.com'].includes(page.hostname))throw new Error('Invalid player source.');
@@ -241,6 +291,9 @@ api.downloads.onCreated.addListener(async item => {
   let paused=false,accepted=false;
   try {
     if (!httpUrl(url) || item.state==='complete') return;
+    // The page that started the download decides; without one, the file's own site.
+    const page=httpUrl(item.referrer)||url, state=await siteState(page);
+    if(state!=='allow'){if(state==='ask')offerSiteAccess(page);return;}
     // IDM's observed ownership model: pause during handoff, resume on failure.
     await api.downloads.pause(item.id); paused=true;
     await sharedHandoff(url,item);accepted=true;

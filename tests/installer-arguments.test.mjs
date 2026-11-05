@@ -28,7 +28,9 @@ test('installer launch reads real child results and preserves spaced owner paths
   await run(compiler,['/V2',`/DOUTPUT_FILE=${executable}`,path.join(root,'tests','fixtures','installer-arguments.nsi')],{windowsHide:true,timeout:10000});
   const source = await fs.readFile(path.join(root,'build','installer.nsh'),'utf8');
   const commands = [...source.matchAll(/!insertmacro AwesomeShellExecResult "runas"[^\r\n]*'([^']+)' \$0 \$1/g)].map(match=>match[1]);
-  assert.equal(commands.length,2,'exercise both install and uninstall commands');
+  // Setup no longer registers a store extension; uninstall still cleans up older registrations.
+  assert.equal(commands.length,1,'exercise the uninstall cleanup command');
+  assert.match(commands[0],/^\/remove /);
   for (const command of commands) {
     const raw = command.replaceAll('$\\"','"').replaceAll('$INSTDIR','C:\\Program Files\\Downloaderr');
     await run(executable,[raw],{windowsVerbatimArguments:true,windowsHide:true,timeout:5000});

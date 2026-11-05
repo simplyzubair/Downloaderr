@@ -25,6 +25,7 @@ function browserSpec(browser) {
 
 async function registerBrowser({ browser, extensionId }, { dataDirectory, integrationRoot, platform = process.platform, home = os.homedir() }) {
   const spec=browserSpec(browser);
+  if (require('./extension-store.cjs').UNTRUSTED_EXTENSION_IDS.has(extensionId)) throw new Error('This extension is not Downloaderr’s own extension.');
   if (typeof extensionId !== 'string' || !(spec.firefox ? /^[A-Za-z0-9@._{}-]{1,128}$/ : /^[a-p]{32}$/).test(extensionId)) throw new Error('Copy the extension ID from your browser’s extensions page.');
   const host = 'com.awesome.downloader';
   const key = `HKCU\\Software\\${spec.registry}\\NativeMessagingHosts\\${host}`;
@@ -47,7 +48,9 @@ async function registerBrowser({ browser, extensionId }, { dataDirectory, integr
   if(previous&&!spec.firefox){
     try {
       const old=JSON.parse(previous);
-      manifest.allowed_origins=[...new Set([...(old.allowed_origins||[]),...manifest.allowed_origins])].filter(value=>/^chrome-extension:\/\/[a-p]{32}\/$/.test(value));
+      const { UNTRUSTED_EXTENSION_IDS } = require('./extension-store.cjs');
+      // Older versions also allowed the upstream store listing; drop it.
+      manifest.allowed_origins=[...new Set([...(old.allowed_origins||[]),...manifest.allowed_origins])].filter(value=>/^chrome-extension:\/\/[a-p]{32}\/$/.test(value)&&!UNTRUSTED_EXTENSION_IDS.has(value.slice(19,51)));
     } catch { /* The invalid file is backed up and replaced below. */ }
   }
   const content = JSON.stringify(manifest, null, 2);
@@ -68,12 +71,32 @@ async function registerBrowser({ browser, extensionId }, { dataDirectory, integr
   }
   return { ok: true, manifestPath, extensionPath };
 }
+// Older versions allowed the upstream store listing in the connector manifests.
+// Remove it from any manifest already on disk, so only Downloaderr's own extension can connect.
+async function removeUntrustedOrigins({ dataDirectory, platform = process.platform, home = os.homedir() }) {
+  const { UNTRUSTED_EXTENSION_IDS } = require('./extension-store.cjs');
+  const files = platform === 'darwin'
+    ? Object.values(BROWSERS).filter(spec => !spec.firefox).map(spec => path.join(macSupport(home), spec.macHosts, 'com.awesome.downloader.json'))
+    : ['Chrome', 'Edge', 'Brave'].map(name => path.join(dataDirectory, 'NativeMessaging', `${name}.json`));
+  const cleaned = [];
+  for (const file of new Set(files)) {
+    let manifest;
+    try { manifest = JSON.parse(await fs.readFile(file, 'utf8')); } catch { continue; }
+    if (!Array.isArray(manifest.allowed_origins)) continue;
+    const allowed = manifest.allowed_origins.filter(value => !UNTRUSTED_EXTENSION_IDS.has(String(value).slice(19, 51)));
+    if (allowed.length === manifest.allowed_origins.length) continue;
+    await fs.writeFile(file, JSON.stringify({ ...manifest, allowed_origins: allowed }, null, 2), 'utf8');
+    cleaned.push(file);
+  }
+  return cleaned;
+}
 // Read only extension registrations, never browser history, cookies, or page data.
 async function connectInstalledBrowsers({ dataDirectory, integrationRoot, platform = process.platform, home = os.homedir(), localAppData = process.env.LOCALAPPDATA, roamingAppData = process.env.APPDATA }, { register = registerBrowser, includeSetupState = false } = {}) {
   const results = [];
   const mac = platform === 'darwin';
   if (mac) localAppData = roamingAppData = macSupport(home);
   const dataOf = spec => mac ? spec.macData : spec.data;
+  await removeUntrustedOrigins({ dataDirectory, platform, home });
   const expected = await fs.realpath(path.join(integrationRoot, 'extension'));
   for (const [browser, spec] of Object.entries(BROWSERS).filter(([,value])=>!value.firefox)) {
     const base=spec.dataRoot==='roaming'?roamingAppData:localAppData;
@@ -89,7 +112,8 @@ async function connectInstalledBrowsers({ dataDirectory, integrationRoot, platfo
         try {
           const settings = inspected.settings;
           for (const [id, entry] of Object.entries(settings)) {
-            if (id === require('./extension-store.cjs').EXTENSION_ID) {
+            if (require('./extension-store.cjs').UNTRUSTED_EXTENSION_IDS.has(id)) continue;
+            if (id && id === require('./extension-store.cjs').EXTENSION_ID) {
               if (inspected.state === 'connected') {
                 ids.add(id); matchedProfiles.add(profile.name);
               }
@@ -153,4 +177,4 @@ async function prepareNativeHost(integrationRoot, executable, platform = process
   }
   await fs.writeFile(path.join(folder, 'runtime-path.txt'), executable, 'utf8');
 }
-module.exports = { BROWSERS, macSupport, browserSpec, registerBrowser, connectInstalledBrowsers, prepareNativeHost };
+module.exports = { BROWSERS, macSupport, browserSpec, registerBrowser, connectInstalledBrowsers, removeUntrustedOrigins, prepareNativeHost };
