@@ -127,14 +127,12 @@
     const panel=document.createElement('div');panel.className='ask';panel.setAttribute('role','dialog');
     // A page can cover an embedded frame, so frames only point to the toolbar popup.
     const framed=window!==window.top;
-    // Clickjacking guard: ignore clicks right after the prompt appears, while it is
-    // covered (elementFromPoint), or while Chrome reports it as not visible.
-    const shownAt=performance.now();let visible=true;
-    if(typeof IntersectionObserver==='function'){
-      try{const observer=new IntersectionObserver(entries=>{for(const entry of entries)if('isVisible' in entry)visible=entry.isVisible;},{trackVisibility:true,delay:100});observer.observe(panel);}catch{}
-    }
+    // Clickjacking guard: ignore clicks right after the prompt appears, and clicks where
+    // something else sits on top of it (elementFromPoint). Chrome's visibility tracking
+    // (IntersectionObserver v2) is not used: it reports any page filter or blur as hidden.
+    const shownAt=performance.now();
     const host=container.host||container;
-    const genuine=event=>event.isTrusted&&performance.now()-shownAt>=600&&visible&&document.elementFromPoint(event.clientX,event.clientY)===host;
+    const genuine=event=>event.isTrusted&&performance.now()-shownAt>=600&&document.elementFromPoint(event.clientX,event.clientY)===host;
     const badge=document.createElement('div');badge.className='badge';badge.innerHTML=MARK;
     const text=document.createElement('p');text.textContent=`Use Downloaderr on ${site||'this site'}?`;
     const sub=document.createElement('span');sub.textContent=framed?'Click the Downloaderr icon in the toolbar to allow or block this site.':note||'Allow lets Downloaderr download videos and files here. No keeps Chrome\u2019s own downloads.';text.append(sub);
