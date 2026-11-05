@@ -15,5 +15,6 @@ fetch('https://api.github.com/repos/simplyzubair/Downloaderr/releases/latest')
     };
     link('download-windows', /^Downloaderr-Setup(-[\d.]+)?\.exe$/);
     link('download-mac', /^Downloaderr(-[\d.]+)?-mac-arm64\.dmg$/);
+    link('download-extension', /^Downloaderr-Extension(-[\d.]+)?\.zip$/);
   })
   .catch(() => {});

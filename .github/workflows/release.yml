@@ -45,15 +45,28 @@ jobs:
         shell: bash
         run: |
           grep -qE "^version: ${VERSION}[[:space:]]*$" release/latest.yml
+      # The browser extension as its own download, for "Load unpacked" (one folder inside the zip).
+      - name: Zip the browser extension
+        shell: pwsh
+        run: |
+          $folder = "release/extension-zip/Downloaderr-Extension"
+          New-Item -ItemType Directory -Force $folder | Out-Null
+          Copy-Item extension/* $folder -Recurse -Exclude *.test.cjs, manifest.firefox.json
+          if (-not (Test-Path "$folder/manifest.json")) { throw 'manifest.json missing from the extension zip' }
+          if (Get-ChildItem $folder -Recurse -Filter *.test.cjs) { throw 'test files in the extension zip' }
+          Compress-Archive -Path $folder -DestinationPath "release/Downloaderr-Extension-$env:VERSION.zip"
       - name: Create SHA-256 file
         shell: powershell
-        run: (Get-FileHash "release/Downloaderr-Setup-$env:VERSION.exe" -Algorithm SHA256).Hash.ToLower() + "  Downloaderr-Setup-$env:VERSION.exe" | Set-Content release/SHA256SUMS.txt
+        run: |
+          $files = "Downloaderr-Setup-$env:VERSION.exe", "Downloaderr-Extension-$env:VERSION.zip"
+          $files | ForEach-Object { (Get-FileHash "release/$_" -Algorithm SHA256).Hash.ToLower() + "  $_" } | Set-Content release/SHA256SUMS.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: windows
           path: |
             release/Downloaderr-Setup-${{ env.VERSION }}.exe
             release/Downloaderr-Setup-${{ env.VERSION }}.exe.blockmap
+            release/Downloaderr-Extension-${{ env.VERSION }}.zip
             release/latest.yml
             release/SHA256SUMS.txt
           if-no-files-found: error
@@ -114,4 +127,4 @@ jobs:
           GH_REPO: ${{ github.repository }}
           VERSION: 0.2.${{ github.run_number }}
         run: |
-          gh release create "v$VERSION" --target "${{ github.sha }}" --title "Downloaderr $VERSION" --generate-notes             "Downloaderr-Setup-$VERSION.exe" "Downloaderr-Setup-$VERSION.exe.blockmap" latest.yml SHA256SUMS.txt             "Downloaderr-$VERSION-mac-arm64.dmg" "Downloaderr-$VERSION-mac-arm64.zip" latest-mac.yml
+          gh release create "v$VERSION" --target "${{ github.sha }}" --title "Downloaderr $VERSION" --generate-notes             "Downloaderr-Setup-$VERSION.exe" "Downloaderr-Setup-$VERSION.exe.blockmap" "Downloaderr-Extension-$VERSION.zip" latest.yml SHA256SUMS.txt             "Downloaderr-$VERSION-mac-arm64.dmg" "Downloaderr-$VERSION-mac-arm64.zip" latest-mac.yml
