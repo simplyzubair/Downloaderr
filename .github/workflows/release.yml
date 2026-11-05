@@ -60,7 +60,7 @@ jobs:
         run: |
           $files = "Downloaderr-Setup-$env:VERSION.exe", "Downloaderr-Extension-$env:VERSION.zip"
           $files | ForEach-Object { (Get-FileHash "release/$_" -Algorithm SHA256).Hash.ToLower() + "  $_" } | Set-Content release/SHA256SUMS.txt
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows
           path: |
@@ -96,7 +96,7 @@ jobs:
           codesign --verify --deep --strict release/mac-arm64/Downloaderr.app
           test -x release/mac-arm64/Downloaderr.app/Contents/Resources/app.asar.unpacked/node_modules/ffmpeg-static/ffmpeg
           grep -qE "^version: ${VERSION}[[:space:]]*$" release/latest-mac.yml
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mac
           path: |
